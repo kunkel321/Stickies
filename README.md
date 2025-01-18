@@ -3,7 +3,7 @@
 * Project:    Sticky Notes
 * Author:     kunkel321
 * Tool used:  Claude AI
-* Version:    1-14-2025
+* Version:    (Version date will be updated in code.)
 * Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 * Repository: https://github.com/kunkel321/Stickies     
 

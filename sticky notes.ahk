@@ -6,8 +6,8 @@ Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
 Version:    1-14-2025
-Forum:      --
-Repository: --     
+Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
+Repository: https://github.com/kunkel321/Stickies     
 
 Hotkeys:
 Ctrl+Shift+N - Create new note
@@ -30,6 +30,7 @@ class OptionsConfig {
     static TOGGLE_MAIN_WINDOW := "^+s"  ; Ctrl+Shift+S
     static NEW_NOTE := "^+n"            ; Ctrl+Shift+N
     static APP_ICON := "sticky.ico"
+    static INI_FILE := "sticky_notes.ini"
 }
 
 ; Global Constants
@@ -40,7 +41,6 @@ class StickyNotesConfig {
     static DEFAULT_FONT := "Arial"
     static DEFAULT_FONT_SIZE := 12
     static DEFAULT_FONT_COLOR := "000000"  ; Black
-    static INI_FILE := "sticky_notes.ini"
     
     ; Color options for notes (expanded pastel shades)
     static COLORS := Map(
@@ -156,16 +156,37 @@ class StickyNotes {
 
     SetupSystemTray() {
         ; Basic tray menu setup - will be expanded in SystemTrayManager component
+        appName := StrReplace(A_ScriptName, ".ahk") 
         A_TrayMenu.Delete()  ; Clear default menu
+        A_TrayMenu.Add(appName, (*) => False) ; Shows name of app at top of menu.
+        A_TrayMenu.Add() 
         A_TrayMenu.Add("Show Main Window", (*) => this.mainWindow.Show())
+        A_TrayMenu.Add("New Sticky Note", (*) => this.CreateNewNote())
         A_TrayMenu.Add()  ; Separator
-        A_TrayMenu.Add("Exit", (*) => this.ExitApp())
-        
-        ; Set default tray icon
+        A_TrayMenu.AddStandard   ; Put the standard menu items back.
+        A_TrayMenu.Add()  ; Separator
+        A_TrayMenu.Add("Start with Windows", (*) => this.StartUpStickies())
+        if FileExist(A_Startup "\sticky notes.lnk")
+            A_TrayMenu.Check("Start with Windows")
+        A_TrayMenu.Add("Open Note ini File", (*) => Run(OptionsConfig.INI_FILE))
+
+        A_TrayMenu.Default := appName ; Set default tray icon
         ;TraySetIcon("imageres.dll",279) ; Yellow sticky with green 'up' arrow
         TraySetIcon(OptionsConfig.APP_ICON)
     }
-        
+
+    StartUpStickies() {
+        if FileExist(A_Startup "\sticky notes.lnk") {
+            FileDelete(A_Startup "\sticky notes.lnk")
+            MsgBox("Sticky Notes will NO LONGER auto start with Windows.",, 4096)
+        }
+        Else {
+            FileCreateShortcut(A_WorkingDir "\sticky notes.exe", A_Startup "\sticky notes.lnk", A_WorkingDir,,,,,)
+            MsgBox("Sticky Notes will auto start with Windows.",, 4096)
+        }
+        Reload()
+    }
+
     ExitApp() {
         ; Cleanup and save before exit
         this.noteManager.SaveAllNotes()
@@ -208,9 +229,9 @@ __New(idNum, options) {
     
     ; Create the basic GUI
     if (this.isOnTop) {
-        this.gui := Gui("-Caption +AlwaysOnTop")
+        this.gui := Gui("-Caption +AlwaysOnTop +Owner")
     } else {
-        this.gui := Gui("-Caption")
+        this.gui := Gui("-Caption +Owner")
     }
     
     this.gui.BackColor := this.bgcolor
@@ -419,11 +440,20 @@ __New(idNum, options) {
         CoordMode("Mouse", "Window")
     }
     
+
     ShowContextMenu(*) {
         noteMenu := Menu()
-        noteMenu.Add("Edit", this.Edit.Bind(this))
-        noteMenu.Add("Hide", this.Hide.Bind(this))
-        noteMenu.Add("Delete", this.Delete.Bind(this))
+        noteMenu.Add("Edit this Note", this.Edit.Bind(this))
+        noteMenu.Add("Hide this Note", this.Hide.Bind(this))
+        noteMenu.Add("Delete this Note", this.Delete.Bind(this))
+        noteMenu.Add()
+        noteMenu.Add("Show Main Window", (*) => app.mainWindow.Show())
+        noteMenu.Add("New Sticky Note", (*) => app.noteManager.CreateNote())
+        noteMenu.Add()
+        noteMenu.Add("Save Status", (*) => app.noteManager.SaveAllNotes())
+        noteMenu.Add("Show Hidden", (*) => app.noteManager.ShowHiddenNotes())
+        noteMenu.Add("ReLoad Notes", (*) => app.noteManager.LoadSavedNotes())
+
         noteMenu.Show()
     }
     
@@ -610,12 +640,48 @@ __New(idNum, options) {
 
 class NoteManager {
     notes := Map()
-    noteCount := 0
+    ;noteCount := 0
     storage := NoteStorage()
     
+        ; Static properties for cascade positioning
+    static CASCADE_OFFSET := 20      ; Pixels to offset each new note
+    static MAX_CASCADE := 10         ; Maximum number of cascaded notes before reset
+    static currentCascadeCount := 0  ; Track number of cascaded notes
+    static baseX := ""              ; Base X position (will be set on first use)
+    static baseY := ""              ; Base Y position (will be set on first use)
+    
+    GetCascadePosition() {
+        ; Initialize base position if not set
+        if (NoteManager.baseX = "" || NoteManager.baseY = "") {
+            ; Get primary monitor's work area (excludes taskbar)
+            MonitorGetWorkArea(MonitorGetPrimary(), &left, &top, &right, &bottom)
+            
+            ; Set initial position near top-left, but not at edge
+            NoteManager.baseX := left + 50
+            NoteManager.baseY := top + 50
+        }
+        
+        ; Reset cascade if maximum reached
+        if (NoteManager.currentCascadeCount >= NoteManager.MAX_CASCADE) {
+            NoteManager.currentCascadeCount := 0
+        }
+        
+        ; Calculate new position
+        x := NoteManager.baseX + (NoteManager.CASCADE_OFFSET * NoteManager.currentCascadeCount)
+        y := NoteManager.baseY + (NoteManager.CASCADE_OFFSET * NoteManager.currentCascadeCount)
+        
+        ; Increment cascade counter
+        NoteManager.currentCascadeCount++
+        
+        return {x: x, y: y}
+    }
+    
     CreateNote(options := "") {
-        ; Increment note counter
-        this.noteCount++
+        ; Generate timestamp ID for new note
+        newId := FormatTime(A_Now, "yyyyMMddHHmmss")
+        
+        ; Get cascade position
+        pos := this.GetCascadePosition()
         
         ; Set default options if none provided
         if !options {
@@ -625,8 +691,8 @@ class NoteManager {
                 font: StickyNotesConfig.DEFAULT_FONT,
                 fontSize: StickyNotesConfig.DEFAULT_FONT_SIZE,
                 fontColor: StickyNotesConfig.DEFAULT_FONT_COLOR,
-                x: "",  ; Empty means center on screen
-                y: "",
+                x: pos.x,           ; Use cascade position
+                y: pos.y,           ; Use cascade position
                 isOnTop: false,
                 isAutoSize: false,
             }
@@ -634,13 +700,13 @@ class NoteManager {
         
         ; Create new note
         try {
-            newNote := Note(this.noteCount, options)
-            this.notes[this.noteCount] := newNote
+            newNote := Note(newId, options)
+            this.notes[newId] := newNote
             
             ; Save initial state
             this.storage.SaveNote(newNote)
             
-            return this.noteCount
+            return newId
         } catch as err {
             MsgBox("Error creating note: " err.Message "`n" err.Stack)
             return 0
@@ -800,13 +866,14 @@ class NoteManager {
             
             for noteData in hiddenNotes {
                 ; Create a preview of the note content
-                preview := StrLen(noteData.content) > 30 
-                    ? SubStr(noteData.content, 1, 27) "..."
+                preview := StrLen(noteData.content) > 40 
+                    ? SubStr(noteData.content, 1, 37) "..."
                     : noteData.content
                     
                 ; Add menu item
                 id := noteData.id  ; Local copy for closure
-                menuText := "Note " id ": " preview
+                ; menuText := "Note " id ": " preview
+                menuText := "---> " preview
                 hiddenMenu.Add(menuText, this.RestoreNote.Bind(this, id))
             }
             
@@ -857,9 +924,19 @@ class NoteManager {
 
 class NoteStorage {
 
+    ; Helper method to generate note section name
+    GetNoteSectionName(id) {
+        return "Note-" id
+    }
+ 
     SaveNote(note) {
         try {
-            sectionName := "Note" note.id
+            ; If the note doesn't have a timestamp ID, create one
+            if !RegExMatch(note.id, "^\d{14}$") {  ; Check if id is not already a timestamp
+                note.id := FormatTime(A_Now, "yyyyMMddHHmmss")
+            }
+            
+            sectionName := this.GetNoteSectionName(note.id)
             
             ; First, normalize line endings to LF
             contentFormatted := note.content
@@ -870,21 +947,21 @@ class NoteStorage {
             contentFormatted := StrReplace(contentFormatted, "`n", "\n")
             
             ; Save all at once to prevent partial writes
-            IniWrite(contentFormatted, StickyNotesConfig.INI_FILE, sectionName, "Content")
-            IniWrite(note.bgcolor, StickyNotesConfig.INI_FILE, sectionName, "Color")
-            IniWrite(note.font, StickyNotesConfig.INI_FILE, sectionName, "Font")
-            IniWrite(note.fontSize, StickyNotesConfig.INI_FILE, sectionName, "FontSize")
-            IniWrite(note.isBold, StickyNotesConfig.INI_FILE, sectionName, "IsBold")
-            IniWrite(note.fontColor, StickyNotesConfig.INI_FILE, sectionName, "FontColor")
+            IniWrite(contentFormatted, OptionsConfig.INI_FILE, sectionName, "Content")
+            IniWrite(note.bgcolor, OptionsConfig.INI_FILE, sectionName, "Color")
+            IniWrite(note.font, OptionsConfig.INI_FILE, sectionName, "Font")
+            IniWrite(note.fontSize, OptionsConfig.INI_FILE, sectionName, "FontSize")
+            IniWrite(note.isBold, OptionsConfig.INI_FILE, sectionName, "IsBold")
+            IniWrite(note.fontColor, OptionsConfig.INI_FILE, sectionName, "FontColor")
             
             ; Save position
             WinGetPos(&x, &y, , , note.gui)
-            IniWrite(x, StickyNotesConfig.INI_FILE, sectionName, "PosX")
-            IniWrite(y, StickyNotesConfig.INI_FILE, sectionName, "PosY")
+            IniWrite(x, OptionsConfig.INI_FILE, sectionName, "PosX")
+            IniWrite(y, OptionsConfig.INI_FILE, sectionName, "PosY")
             
             ; Save settings
-            IniWrite(note.isOnTop, StickyNotesConfig.INI_FILE, sectionName, "IsOnTop")
-            IniWrite(note.width, StickyNotesConfig.INI_FILE, sectionName, "Width")
+            IniWrite(note.isOnTop, OptionsConfig.INI_FILE, sectionName, "IsOnTop")
+            IniWrite(note.width, OptionsConfig.INI_FILE, sectionName, "Width")
             
             return true
         } catch as err {
@@ -895,86 +972,40 @@ class NoteStorage {
     
     LoadNote(id) {
         try {
-            sectionName := "Note" id
-            
-            ; FileAppend(
-            ;     "`nAttempting to load note " id "`n",
-            ;     "error_log.txt"
-            ; )
+            sectionName := this.GetNoteSectionName(id)
             
             ; Check if note exists
             if !this.NoteExists(id) {
-                ; FileAppend(
-                ;     "Note " id " doesn't exist in INI`n",
-                ;     "error_log.txt"
-                ; )
                 return false
             }
             
             ; Load raw content from INI
-            rawContent := IniRead(StickyNotesConfig.INI_FILE, sectionName, "Content", "")
-            ; FileAppend(
-            ;     "Raw content: " rawContent "`n",
-            ;     "error_log.txt"
-            ; )
+            rawContent := IniRead(OptionsConfig.INI_FILE, sectionName, "Content", "")
             
             ; Convert literal '\n' back to actual newlines
             unescapedContent := StrReplace(rawContent, "\n", "`n")
             
             ; Load all note data
-            bgcolor := IniRead(StickyNotesConfig.INI_FILE, sectionName, "Color", StickyNotesConfig.DEFAULT_BG_COLOR)
-            font := IniRead(StickyNotesConfig.INI_FILE, sectionName, "Font", StickyNotesConfig.DEFAULT_FONT)
-            fontSize := IniRead(StickyNotesConfig.INI_FILE, sectionName, "FontSize", StickyNotesConfig.DEFAULT_FONT_SIZE)
-            fontColor := IniRead(StickyNotesConfig.INI_FILE, sectionName, "FontColor", StickyNotesConfig.DEFAULT_FONT_COLOR)
-            x := IniRead(StickyNotesConfig.INI_FILE, sectionName, "PosX", "")
-            y := IniRead(StickyNotesConfig.INI_FILE, sectionName, "PosY", "")
-            isOnTop := IniRead(StickyNotesConfig.INI_FILE, sectionName, "IsOnTop", "0")
-            
-            ; FileAppend(
-            ;     "Loaded properties:`n"
-            ;     . "  bgcolor: " bgcolor "`n"
-            ;     . "  font: " font "`n"
-            ;     . "  fontSize: " fontSize "`n"
-            ;     . "  fontColor: " fontColor "`n"
-            ;     . "  x: " x "`n"
-            ;     . "  y: " y "`n"
-            ;     . "  isOnTop: " isOnTop "`n",
-            ;     "error_log.txt"
-            ; )
-            
             noteData := {
-                id: id,
+                id: id,  ; Keep the timestamp ID
                 content: unescapedContent,
-                bgcolor: bgcolor,
-                font: font,
-                fontSize: Integer(fontSize),
-                isBold: Integer(IniRead(StickyNotesConfig.INI_FILE, sectionName, "IsBold", "0")),
-                fontColor: fontColor,
-                x: Integer(x),
-                y: Integer(y),
-                isOnTop: Integer(isOnTop),
-                 width: Integer(IniRead(StickyNotesConfig.INI_FILE, sectionName, "Width", StickyNotesConfig.DEFAULT_WIDTH)),
-                isHidden: Integer(IniRead(StickyNotesConfig.INI_FILE, sectionName, "Hidden", "0"))
+                bgcolor: IniRead(OptionsConfig.INI_FILE, sectionName, "Color", StickyNotesConfig.DEFAULT_BG_COLOR),
+                font: IniRead(OptionsConfig.INI_FILE, sectionName, "Font", StickyNotesConfig.DEFAULT_FONT),
+                fontSize: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "FontSize", StickyNotesConfig.DEFAULT_FONT_SIZE)),
+                isBold: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "IsBold", "0")),
+                fontColor: IniRead(OptionsConfig.INI_FILE, sectionName, "FontColor", StickyNotesConfig.DEFAULT_FONT_COLOR),
+                x: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "PosX", "")),
+                y: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "PosY", "")),
+                isOnTop: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "IsOnTop", "0")),
+                width: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "Width", StickyNotesConfig.DEFAULT_WIDTH)),
+                isHidden: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "Hidden", "0"))
             }
-            
-            ; FileAppend(
-            ;     "Constructed noteData object with properties:`n"
-            ;     . "  id: " noteData.id "`n"
-            ;     . "  content length: " StrLen(noteData.content) "`n",
-            ;     "error_log.txt"
-            ; )
             
             return noteData
         } catch as err {
-            ; FileAppend(
-            ;     "Error loading note from INI: " err.Message "`n"
-            ;     . "Stack: " err.Stack "`n",
-            ;     "error_log.txt"
-            ; )
             return false
         }
     }
-    
 
     static isLoading := false
     
@@ -986,18 +1017,18 @@ class NoteStorage {
             }
             
             NoteStorage.isLoading := true
-            ; FileAppend("Loading notes from storage`n", "error_log.txt")
             
             notes := []
-            sections := IniRead(StickyNotesConfig.INI_FILE)
+            sections := IniRead(OptionsConfig.INI_FILE)
             if !sections {
                 NoteStorage.isLoading := false
                 return notes
             }
             
             loop parse, sections, "`n", "`r" {
-                if RegExMatch(A_LoopField, "Note(\d+)", &match) {
-                    noteId := Integer(match[1])
+                ; Update regex to match new timestamp format
+                if RegExMatch(A_LoopField, "Note-(\d{14})", &match) {
+                    noteId := match[1]
                     if noteData := this.LoadNote(noteId) {
                         notes.Push(noteData)
                     }
@@ -1008,7 +1039,6 @@ class NoteStorage {
             return notes
             
         } catch as err {
-            ; FileAppend("Error loading notes: " err.Message "`n", "error_log.txt")
             NoteStorage.isLoading := false
             return []
         }
@@ -1016,7 +1046,7 @@ class NoteStorage {
     
     DeleteNote(id) {
         try {
-            IniDelete(StickyNotesConfig.INI_FILE, "Note" id)
+            IniDelete(OptionsConfig.INI_FILE, this.GetNoteSectionName(id))
             return true
         } catch as err {
             MsgBox("Error deleting note from INI: " err.Message)
@@ -1028,21 +1058,19 @@ class NoteStorage {
         try {
             hiddenNotes := []
             
-            ; Read all sections
-            sections := IniRead(StickyNotesConfig.INI_FILE)
+            sections := IniRead(OptionsConfig.INI_FILE)
             if !sections {
                 return hiddenNotes
             }
             
-            ; Find hidden notes
             loop parse, sections, "`n", "`r" {
-                if RegExMatch(A_LoopField, "Note(\d+)", &match) {
-                    noteId := Integer(match[1])
+                ; Update regex to match new timestamp format
+                if RegExMatch(A_LoopField, "Note-(\d{14})", &match) {
+                    noteId := match[1]
                     
                     ; Check if note is marked as hidden
-                    isHidden := IniRead(StickyNotesConfig.INI_FILE, A_LoopField, "Hidden", "0")
+                    isHidden := IniRead(OptionsConfig.INI_FILE, A_LoopField, "Hidden", "0")
                     if (isHidden = "1") {
-                        ; Load the full note data
                         if noteData := this.LoadNote(noteId) {
                             hiddenNotes.Push(noteData)
                         }
@@ -1057,10 +1085,11 @@ class NoteStorage {
         }
     }
     
+
     MarkNoteHidden(id) {
         try {
-            sectionName := "Note" id
-            IniWrite("1", StickyNotesConfig.INI_FILE, sectionName, "Hidden")
+            sectionName := this.GetNoteSectionName(id)
+            IniWrite("1", OptionsConfig.INI_FILE, sectionName, "Hidden")
             return true
         } catch as err {
             MsgBox("Error marking note as hidden: " err.Message)
@@ -1070,8 +1099,8 @@ class NoteStorage {
     
     MarkNoteVisible(id) {
         try {
-            sectionName := "Note" id
-            IniWrite("0", StickyNotesConfig.INI_FILE, sectionName, "Hidden")
+            sectionName := this.GetNoteSectionName(id)
+            IniWrite("0", OptionsConfig.INI_FILE, sectionName, "Hidden")
             return true
         } catch as err {
             MsgBox("Error marking note as visible: " err.Message)
@@ -1081,7 +1110,7 @@ class NoteStorage {
     
     NoteExists(id) {
         try {
-            return IniRead(StickyNotesConfig.INI_FILE, "Note" id, "Content", "") != ""
+            return IniRead(OptionsConfig.INI_FILE, this.GetNoteSectionName(id), "Content", "") != ""
         } catch {
             return false
         }
@@ -1100,17 +1129,20 @@ class NoteEditor {
     }
     
     CreateGui() {
-        ; Create editor window
+        ; Create editor window - don't set window background color
         this.gui := Gui("+AlwaysOnTop", "Edit Note " this.note.id)
         
-        ; Set window background color
-        this.gui.BackColor := this.note.bgcolor
-        
-        ; Create edit control with matching background color
+        ; Create edit control with matching background color and correct bold state
         this.editControl := this.gui.Add("Edit",
             "x5 y5 w" StickyNotesConfig.DEFAULT_WIDTH " h200 +Multi +WantReturn Background" this.note.bgcolor,
             this.note.content)
-        this.editControl.SetFont("s" this.note.fontSize, this.note.font)
+            
+        ; Set font properties including bold state
+        this.editControl.SetFont(
+            "s" this.note.fontSize 
+            (this.note.isBold ? " bold" : " norm"), 
+            this.note.font
+        )
         this.editControl.SetFont("c" this.note.fontColor)
         
         ; Add formatting controls
@@ -1205,10 +1237,10 @@ class NoteEditor {
             ; Update edit control's background color
             this.editControl.Opt("Background" colorCode)
             
-            ; Also update the GUI background to match
-            this.gui.BackColor := colorCode
+            ; Force redraw of the edit control
+            this.editControl.Redraw()
         }
-    }
+    }  
     
     UpdateFont(fontName) {
         this.note.font := fontName
@@ -1336,6 +1368,8 @@ class MainWindow {
         ; Set up events
         this.gui.OnEvent("Close", (*) => this.ExitApp())
         this.gui.OnEvent("Escape", (*) => this.Hide())
+
+        ; this.gui.Opt("+Owner") ; enable this to prevent main gui taskbar icon.
         
         ; Show the window
         ; this.Show() ; disable this to keep window from showing at startup. 

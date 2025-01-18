@@ -1,10 +1,11 @@
 # Sticky Notes
-Project:    Sticky Notes
-Author:     kunkel321
-Tool used:  Claude AI
-Version:    1-14-2025
-Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
-Repository: https://github.com/kunkel321/Stickies     
+(from code comments)
+* Project:    Sticky Notes
+* Author:     kunkel321
+* Tool used:  Claude AI
+* Version:    1-14-2025
+* Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
+* Repository: https://github.com/kunkel321/Stickies     
 
 Hotkeys:
 * Ctrl+Shift+N - Create new note

@@ -5,7 +5,7 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    1-17-2025
+Version:    1-21-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -21,17 +21,24 @@ If a note's text has multiple lines, and any of those lines start with
 [] or
 [x] then those lines of text will be made into checkbox controls.  
 
-If you change the length of text after the note have already been made, or if you check/uncheck boxes, I recommend doing "Save Status" from the note context menu or the main form.  This will save all notes and properties to the ini file.  Then do "Load Notes" (or "ReLoad Notes".) IF the note size hasn't adjusted correctly. 
+If you change the length of text after the note have already been made, or if you check/uncheck boxes, I recommend doing "Save Status" from the note context menu or the main form.  This will save all notes and properties to the ini file.  Then do "Load/ReLaod Notes" if the note size hasn't adjusted correctly. 
 
 This script is unique because nearly every bit of code was created with AI prompts, then pasted into the ahk editor.  A great deal of human input was needed, but very little of the actual code was human-generated.  Edit: In later versions, more human code was added.
 */
 
 ; Hotkey Configuration.  Change hotkeys if desired.
 class OptionsConfig {
-    static TOGGLE_MAIN_WINDOW := "^+s"  ; Ctrl+Shift+S
-    static NEW_NOTE := "^+n"            ; Ctrl+Shift+N
+    static TOGGLE_MAIN_WINDOW := "^+s"     ; Ctrl+Shift+S
+    static NEW_NOTE := "^+n"               ; Ctrl+Shift+N
+    static NEW_CLIPBOARD_NOTE := "^+c"     ; Ctrl+Shift+C
     static APP_ICON := "sticky.ico"
     static INI_FILE := "sticky_notes.ini"
+    static ERROR_LOG := 0                  ; 1 = yes, 0 = no
+    static AUTO_OPEN_EDITOR := 1           ; 1 = yes, 0 = no
+    static MAX_NOTE_WORDS := 200           ; Maximum words in a note
+    static MAX_NOTE_LINES := 35            ; Maximum lines in a 
+    ; To prevent accidental checkbox clicks.  Blank "" means don't require modifer.
+    static CHECKBOX_MODIFIER_KEY := "Alt" 
 }
 
 ; Global Constants
@@ -137,6 +144,7 @@ class StickyNotes {
         ; Bind hotkeys to methods
         HotKey(OptionsConfig.TOGGLE_MAIN_WINDOW, (*) => this.ToggleMainWindow())
         HotKey(OptionsConfig.NEW_NOTE, (*) => this.CreateNewNote())
+        HotKey(OptionsConfig.NEW_CLIPBOARD_NOTE, (*) => this.CreateClipboardNote())  ; Add this line
     }
     
     ToggleMainWindow(*) {
@@ -147,8 +155,111 @@ class StickyNotes {
         }
     }
     
+    ProcessClipboardText() {
+        ; Check if clipboard has text
+        if (!A_Clipboard) {
+            MsgBox("No text found on clipboard.", "Sticky Notes", 48)
+            return ""
+        }
+
+        text := A_Clipboard
+        needsTruncation := false
+        truncatedText := text
+
+        ; Count words (rough approximation)
+        wordCount := 0
+        loop parse, text, A_Space "`n`r`t"
+            wordCount++
+
+        ; Count lines
+        lineCount := 0
+        loop parse, text, "`n", "`r"
+            lineCount++
+
+        ; Check if text needs truncation
+        if (wordCount > OptionsConfig.MAX_NOTE_WORDS || lineCount > OptionsConfig.MAX_NOTE_LINES) {
+            needsTruncation := true
+            truncatedLines := []
+            currentWords := 0
+            
+            ; Process line by line
+            loop parse, text, "`n", "`r" {
+                ; Stop if we hit max lines
+                if (A_Index > OptionsConfig.MAX_NOTE_LINES) {
+                    break
+                }
+
+                ; Count words in this line
+                lineWords := 0
+                loop parse, A_LoopField, A_Space
+                    lineWords++
+
+                ; Check if adding this line would exceed word limit
+                if (currentWords + lineWords > OptionsConfig.MAX_NOTE_WORDS) {
+                    ; Add partial line up to word limit if possible
+                    if (currentWords < OptionsConfig.MAX_NOTE_WORDS) {
+                        words := []
+                        wordCount := 0
+                        loop parse, A_LoopField, A_Space {
+                            if (currentWords + wordCount < OptionsConfig.MAX_NOTE_WORDS) {
+                                words.Push(A_LoopField)
+                            } else {
+                                break
+                            }
+                            wordCount++
+                        }
+                        if (words.Length > 0) {
+                            truncatedLines.Push(Join(words, " "))
+                        }
+                    }
+                    break
+                }
+
+                truncatedLines.Push(A_LoopField)
+                currentWords += lineWords
+            }
+
+            truncatedText := Join(truncatedLines, "`n") "`n..."
+            MsgBox("Note text has been truncated due to length.`n`nOriginal text had "
+                . wordCount . " words and " . lineCount . " lines.", "Sticky Notes", 64)
+        }
+
+        return truncatedText
+    }
+
+    CreateClipboardNote(*) {
+        ; Process clipboard text
+        text := this.ProcessClipboardText()
+        if (!text) {
+            return  ; No valid text to create note with
+        }
+
+        ; Create the note
+        noteId := this.noteManager.CreateNote({
+            content: text,
+            bgcolor: StickyNotesConfig.DEFAULT_BG_COLOR,
+            font: StickyNotesConfig.DEFAULT_FONT,
+            fontSize: StickyNotesConfig.DEFAULT_FONT_SIZE,
+            fontColor: StickyNotesConfig.DEFAULT_FONT_COLOR,
+            x: "",  ; Empty means use cascade position
+            y: "",
+            isOnTop: false,
+            isAutoSize: false,
+        })
+
+        ; Auto-open editor if enabled
+        if (OptionsConfig.AUTO_OPEN_EDITOR && noteId) {
+            this.noteManager.notes[noteId].Edit()
+        }
+    }
+
     CreateNewNote(*) {
-        this.noteManager.CreateNote()
+        noteId := this.noteManager.CreateNote()
+        
+        ; Auto-open editor if enabled
+        if (OptionsConfig.AUTO_OPEN_EDITOR && noteId) {
+            this.noteManager.notes[noteId].Edit()
+        }
     }
     
     LoadNotesOnStartup() {
@@ -193,6 +304,16 @@ class StickyNotes {
         this.noteManager.SaveAllNotes()
         ExitApp()
     }
+    
+}
+
+; Helper function to join array elements
+Join(arr, delimiter) {
+    result := ""
+    for item in arr {
+        result .= (A_Index = 1 ? "" : delimiter) item
+    }
+    return result
 }
 
 ; Create and start the application
@@ -216,54 +337,54 @@ class Note {
     currentX := ""
     currentY := ""
 
-__New(idNum, options) {
-    ; Store note ID and properties
-    this.id := idNum
-    this.content := options.content
-    this.bgcolor := options.bgcolor
-    this.font := options.font
-    this.fontSize := options.fontSize
-    this.isBold := options.HasOwnProp("isBold") ? options.isBold : false
-    this.fontColor := options.fontColor
-    this.isOnTop := options.isOnTop
-    this.width := options.HasOwnProp("width") ? options.width : StickyNotesConfig.DEFAULT_WIDTH
-    
-    ; Create the basic GUI
-    if (this.isOnTop) {
-        this.gui := Gui("-Caption +AlwaysOnTop +Owner")
-    } else {
-        this.gui := Gui("-Caption +Owner")
-    }
-    
-    this.gui.BackColor := this.bgcolor
-    
-    ; Create drag area
-    this.dragArea := this.gui.Add("Text", 
-        "x0 y0 w" this.width " h20 Background" this.bgcolor)
+    __New(idNum, options) {
+        ; Store note ID and properties
+        this.id := idNum
+        this.content := options.content
+        this.bgcolor := options.bgcolor
+        this.font := options.font
+        this.fontSize := options.fontSize
+        this.isBold := options.HasOwnProp("isBold") ? options.isBold : false
+        this.fontColor := options.fontColor
+        this.isOnTop := options.isOnTop
+        this.width := options.HasOwnProp("width") ? options.width : StickyNotesConfig.DEFAULT_WIDTH
         
-    ; Set default font
-    this.gui.SetFont("s" this.fontSize (this.isBold ? " bold" : ""), this.font)
-    
-    ; Create note content
-    if (InStr(this.content, "[]") || InStr(this.content, "[x]")) {
-        this.CreateComplexNote()
-    } else {
-        this.CreateSimpleNote()
+        ; Create the basic GUI
+        if (this.isOnTop) {
+            this.gui := Gui("-Caption +AlwaysOnTop +Owner")
+        } else {
+            this.gui := Gui("-Caption +Owner")
+        }
+        
+        this.gui.BackColor := this.bgcolor
+        
+        ; Create drag area
+        this.dragArea := this.gui.Add("Text", 
+            "x0 y0 w" this.width " h20 Background" this.bgcolor)
+            
+        ; Set default font
+        this.gui.SetFont("s" this.fontSize (this.isBold ? " bold" : ""), this.font)
+        
+        ; Create note content
+        if (InStr(this.content, "[]") || InStr(this.content, "[x]")) {
+            this.CreateComplexNote()
+        } else {
+            this.CreateSimpleNote()
+        }
+        
+        ; Show GUI with position
+        if (options.HasOwnProp("x") && options.HasOwnProp("y") 
+            && options.x != "" && options.y != ""
+            && options.x is Integer && options.y is Integer) {
+            this.gui.Show("x" options.x " y" options.y)
+        } else {
+            this.gui.Show()
+        }
+        
+        ; Set up events
+        this.SetupEvents()
+        this.UpdatePosition()
     }
-    
-    ; Show GUI with position
-    if (options.HasOwnProp("x") && options.HasOwnProp("y") 
-        && options.x != "" && options.y != ""
-        && options.x is Integer && options.y is Integer) {
-        this.gui.Show("x" options.x " y" options.y)
-    } else {
-        this.gui.Show()
-    }
-    
-    ; Set up events
-    this.SetupEvents()
-    this.UpdatePosition()
-}
 
     ; Helper method to get object keys
     GetObjectKeys(obj) {
@@ -405,7 +526,8 @@ __New(idNum, options) {
     }
 
     DoubleClickHandler(*) {
-        ;FileAppend("Double-click detected`n", "error_log.txt")
+        if (OptionsConfig.ERROR_LOG)
+            FileAppend("Double-click detected`n", "error_log.txt")
         this.Edit()
     }
 
@@ -459,6 +581,12 @@ __New(idNum, options) {
     }
     
     SaveCheckboxState(ctrl, *) {
+        ; Require modifier key to toggle checkbox?
+        If !(OptionsConfig.CHECKBOX_MODIFIER_KEY = "")
+            if !GetKeyState(OptionsConfig.CHECKBOX_MODIFIER_KEY) {
+                ctrl.Value := !ctrl.Value
+                Return
+            }
         ; Get checkbox text and value
         checkboxText := ctrl.Text
         isChecked := ctrl.Value
@@ -578,11 +706,13 @@ __New(idNum, options) {
             
             ; Check if position is within screen bounds
             if (x < left || x > right || y < top || y > bottom) {
-                ; FileAppend(
-                ;     "Position out of bounds - x: " x ", y: " y 
-                ;     . " (screen: " left "," top "," right "," bottom ")`n",
-                ;     "error_log.txt"
-                ; )
+                if (OptionsConfig.ERROR_LOG) {
+                    FileAppend(
+                        "Position out of bounds - x: " x ", y: " y 
+                        . " (screen: " left "," top "," right "," bottom ")`n",
+                        "error_log.txt"
+                    )
+                }
                 return false
             }
             return true
@@ -590,8 +720,6 @@ __New(idNum, options) {
             return false
         }
     }
-
-
 
     Hide(*) {
         this.gui.Hide()
@@ -605,20 +733,51 @@ __New(idNum, options) {
     
     Delete(*) {
         if (MsgBox("Are you sure you want to delete this note?",, "YesNo") = "Yes") {
-            ; Delete from storage first
-            storage := NoteStorage()
-            storage.DeleteNote(this.id)
-            
-            ; Then destroy the GUI
-            this.Destroy()
+            ; Use the app's noteManager to delete this note
+            app.noteManager.DeleteNote(this.id)
         }
     }
     
     Destroy(*) {
-        if (this.editor) {
-            this.editor.Destroy()
+        try {
+            ; First clean up event bindings
+            if (this.dragArea) {
+                this.dragArea.OnEvent("Click", this.StartDrag.Bind(this), 0)
+                this.dragArea.OnEvent("DoubleClick", this.DoubleClickHandler.Bind(this), 0)
+                this.dragArea := ""
+            }
+
+            ; Clean up controls array
+            if (this.controls) {
+                for item in this.controls {
+                    if (item.HasOwnProp("control") && item.control) {
+                        if (item.type == "checkbox") {
+                            item.control.OnEvent("Click", this.SaveCheckboxState.Bind(this), 0)
+                        }
+                        item.control := ""
+                    }
+                }
+                this.controls := []
+            }
+
+            ; Clean up editor if it exists
+            if (this.editor) {
+                this.editor.Destroy()
+                this.editor := ""
+            }
+
+            ; Finally destroy the GUI
+            if (this.gui) {
+                this.gui.OnEvent("ContextMenu", this.ShowContextMenu.Bind(this), 0)
+                this.gui.Destroy()
+                this.gui := ""
+            }
+
+            return true
+        } catch as err {
+            LogError("Error in Note.Destroy: " err.Message)
+            return false
         }
-        this.gui.Destroy()
     }
         
     UpdatePosition(*) {
@@ -716,16 +875,18 @@ class NoteManager {
 
     SaveAllNotes() {
         try {
-            ; FileAppend("`nStarting SaveAllNotes...`n", "error_log.txt")
-            ; FileAppend("Current number of notes: " this.notes.Count "`n", "error_log.txt")
-            
+            if (OptionsConfig.ERROR_LOG) {
+                FileAppend("`nStarting SaveAllNotes...`n", "error_log.txt")
+                FileAppend("Current number of notes: " this.notes.Count "`n", "error_log.txt")
+            }
             for id, note in this.notes {
                 try {
                     ; Get and log current position
                     x := 0
                     y := 0
                     note.gui.GetPos(&x, &y)
-                    ; FileAppend("Saving note " id " at position x=" x ", y=" y "`n", "error_log.txt")
+                    if (OptionsConfig.ERROR_LOG)
+                        FileAppend("Saving note " id " at position x=" x ", y=" y "`n", "error_log.txt")
                     
                     ; Update position properties
                     note.currentX := x
@@ -734,76 +895,57 @@ class NoteManager {
                     ; Save to storage
                     this.storage.SaveNote(note)
                     
-                } ;catch as err {
-                ;     FileAppend("Error saving note " id ": " err.Message "`n", "error_log.txt")
-                ; }
+                } catch as err {
+                    if (OptionsConfig.ERROR_LOG)
+                        FileAppend("Error saving note " id ": " err.Message "`n", "error_log.txt")
+                }
             }
             
-            ; FileAppend("SaveAllNotes complete`n", "error_log.txt")
+            if (OptionsConfig.ERROR_LOG)
+                FileAppend("SaveAllNotes complete`n", "error_log.txt")
             return true
         } catch as err {
-            ; FileAppend("Error in SaveAllNotes: " err.Message "`n", "error_log.txt")
+            if (OptionsConfig.ERROR_LOG)
+                FileAppend("Error in SaveAllNotes: " err.Message "`n", "error_log.txt")
             return false
         }
     }
 
     LoadSavedNotes() {
         try {
-            ; FileAppend("`nStarting LoadSavedNotes...`n", "error_log.txt")
-            
-            ; Get all saved notes from storage
-            savedNotes := this.storage.LoadAllNotes()
-            ; FileAppend("Found " savedNotes.Length " notes in storage`n", "error_log.txt")
-            
             ; First destroy all existing note GUIs and editors
-            ; FileAppend("Current notes in memory: " this.notes.Count "`n", "error_log.txt")
             for id, existingNote in this.notes {
-                try {
-                    ; FileAppend("Destroying note " id "`n", "error_log.txt")
-                    if (existingNote.editor) {
-                        existingNote.editor.Destroy()
-                    }
-                    if (existingNote.gui) {
-                        existingNote.gui.Destroy()
-                    }
-                } ;catch as err {
-                ;     FileAppend("Error destroying note " id ": " err.Message "`n", "error_log.txt")
-                ; }
+                if (!existingNote.Destroy()) {
+                    LogError("Failed to destroy note " id)
+                }
             }
             
             ; Reset note tracking completely
-            this.notes := Map()  ; Create new Map
-            this.noteCount := 0
+            this.notes := Map()
+            
+            ; Get all saved notes from storage
+            savedNotes := this.storage.LoadAllNotes()
             
             ; Process each saved note
             for noteData in savedNotes {
                 try {
-                    ; FileAppend("Loading note " noteData.id " with position x=" noteData.x ", y=" noteData.y "`n", "error_log.txt")
-                    
-                    if (noteData.id > this.noteCount) {
-                        this.noteCount := noteData.id
-                    }
-                    
                     ; Only create visible GUI if note is not hidden
                     if (!noteData.isHidden) {
                         newNote := Note(noteData.id, noteData)
                         this.notes[noteData.id] := newNote
                     }
-                    
                 } catch as err {
-                    ; FileAppend("Error creating note " noteData.id ": " err.Message "`n", "error_log.txt")
+                    LogError("Error creating note " noteData.id ": " err.Message)
                     continue
                 }
             }
             
-            ; FileAppend("LoadSavedNotes complete. Notes in memory: " this.notes.Count "`n", "error_log.txt")
             return true
         } catch as err {
-            ; FileAppend("Error in LoadSavedNotes: " err.Message "`n", "error_log.txt")
+            LogError("Error in LoadSavedNotes: " err.Message)
             return false
         }
     }
-
 
     DeleteNote(id) {
         if !this.notes.Has(id) {
@@ -817,19 +959,22 @@ class NoteManager {
             ; Remove from storage first
             this.storage.DeleteNote(id)
             
-            ; Destroy note GUI
+            ; Destroy note and all its resources
             note.Destroy()
             
-            ; Remove from collection - THIS IS THE KEY ADDITION
+            ; Remove from collection and clear reference
             this.notes.Delete(id)
+            note := ""
             
             return true
         } catch as err {
+            if (OptionsConfig.ERROR_LOG)
+                FileAppend("Error in DeleteNote for id " id ": " err.Message "`n", "error_log.txt")
             MsgBox("Error deleting note " id ": " err.Message)
             return false
         }
     }
-    
+
     HideNote(id) {
         if !this.notes.Has(id) {
             return false
@@ -899,11 +1044,6 @@ class NoteManager {
             ; Create new note with saved data
             newNote := Note(id, noteData)
             this.notes[id] := newNote
-            
-            ; Update note count if necessary
-            if (id > this.noteCount) {
-                this.noteCount := id
-            }
             
             ; Mark as not hidden
             this.storage.MarkNoteVisible(id)
@@ -1045,15 +1185,7 @@ class NoteStorage {
         }
     }
     
-    DeleteNote(id) {
-        try {
-            IniDelete(OptionsConfig.INI_FILE, this.GetNoteSectionName(id))
-            return true
-        } catch as err {
-            MsgBox("Error deleting note from INI: " err.Message)
-            return false
-        }
-    }
+
     
     GetHiddenNotes() {
         try {
@@ -1113,6 +1245,17 @@ class NoteStorage {
         try {
             return IniRead(OptionsConfig.INI_FILE, this.GetNoteSectionName(id), "Content", "") != ""
         } catch {
+            return false
+        }
+    }
+
+    DeleteNote(id) {
+        try {
+            IniDelete(OptionsConfig.INI_FILE, this.GetNoteSectionName(id))
+            return true
+        } catch as err {
+            if (OptionsConfig.ERROR_LOG)
+                FileAppend("Error in NoteStorage.DeleteNote for id " id ": " err.Message "`n", "error_log.txt")
             return false
         }
     }
@@ -1330,8 +1473,33 @@ class NoteEditor {
     }
     
     Destroy(*) {
-        this.gui.Destroy()
+        try {
+            ; Clean up event bindings
+            if (this.gui) {
+                this.gui.OnEvent("Close", (*) => this.Hide(), 0)
+                
+                if (this.editControl) {
+                    this.editControl := ""
+                }
+
+                this.gui.Destroy()
+                this.gui := ""
+            }
+
+            return true
+        } catch as err {
+            LogError("Error in NoteEditor.Destroy: " err.Message)
+            return false
+        }
     }
+}
+
+FormatHotkeyForDisplay(hotkeyStr) {
+    return (InStr(hotkeyStr, "^") ? "Ctrl+" : "")
+        . (InStr(hotkeyStr, "+") ? "Shift+" : "")
+        . (InStr(hotkeyStr, "!") ? "Alt+" : "")
+        . (InStr(hotkeyStr, "#") ? "Win+" : "")
+        . StrUpper(SubStr(hotkeyStr, RegExMatch(hotkeyStr, "[a-zA-Z0-9]")))
 }
 
 class MainWindow {
@@ -1345,34 +1513,52 @@ class MainWindow {
     CreateGui() {
         ; Create main window
         this.gui := Gui("+AlwaysOnTop +Resize", "Sticky Notes Manager")
-        
-        ; Add buttons vertically
-        this.gui.Add("Button", "w120 h30", "New Note")
+        buttonW := 120  ; Button width
+        spacing := 10   ; Space between buttons
+        helpTextFont := 11
+
+        this.gui.setFont("s" helpTextFont + 1 " w700")
+        this.gui.Add("Text", "Center x10 y10 w" (buttonW * 2 + spacing), "Sticky Notes Manager")
+        this.gui.setFont("s" helpTextFont " w400")
+        ; Add separator
+        this.gui.Add("Text", "x10 y+10 w" (buttonW * 2 + spacing) " h2 0x10")  ; Horizontal line
+
+        ; Create button group 1 - Core Functions
+        this.gui.Add("Button", "x10 y+10 w" buttonW " h30", "New Note")
             .OnEvent("Click", (*) => app.noteManager.CreateNote())
+        
+        this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "New From Clpbrd")
+            .OnEvent("Click", (*) => app.CreateClipboardNote())
             
-        this.gui.Add("Button", "w120 h30 y+5", "Load Notes")
+        this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "Load Notes")
             .OnEvent("Click", (*) => app.noteManager.LoadSavedNotes())
             
-        this.gui.Add("Button", "w120 h30 y+5", "Show Hidden")
+        this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "Show Hidden")
             .OnEvent("Click", (*) => app.noteManager.ShowHiddenNotes())
             
-        this.gui.Add("Button", "w120 h30 y+5", "Save Status")
+        this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "Save Status")
             .OnEvent("Click", (*) => app.noteManager.SaveAllNotes())
             
-        this.gui.Add("Button", "w120 h30 y+5", "Exit App")
+        this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "Exit App")
             .OnEvent("Click", (*) => this.ExitApp())
-        
-        ; Add help text
-        helpText := "Right-click notes to edit them`nDrag notes to move them"
-        this.gui.Add("Text", "y+10 w120", helpText)
+
+        this.gui.Add("Button", "x10 y+10 w" (buttonW * 2 + spacing) " h30", "Hide This Window")
+            .OnEvent("Click", (*) => this.Hide())
+            
+        ; Add help text at bottom with full width
+        this.gui.Add("Text", "x10 y+10 w" (buttonW * 2 + spacing) " h2 0x10")  ; Horizontal line
+
+        helpText :=  FormatHotkeyForDisplay(OptionsConfig.NEW_NOTE) " = New Note`n"
+            . FormatHotkeyForDisplay(OptionsConfig.NEW_CLIPBOARD_NOTE) " = Clipboard Note`n"
+            . FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) " = Show/Hide Window"
+            . (OptionsConfig.CHECKBOX_MODIFIER_KEY? "`n" OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click = Toggle Checkbox" : "")
+        this.gui.Add("Text", "x10 y+10 w" (buttonW * 2 + spacing), helpText)
         
         ; Set up events
         this.gui.OnEvent("Close", (*) => this.ExitApp())
         this.gui.OnEvent("Escape", (*) => this.Hide())
 
         ; this.gui.Opt("+Owner") ; enable this to prevent main gui taskbar icon.
-        
-        ; Show the window
         ; this.Show() ; disable this to keep window from showing at startup. 
     }
     
@@ -1390,8 +1576,26 @@ class MainWindow {
     }
     
     ExitApp(*) {
-        ; Save all notes state before exiting
+        ; Save all notes and clean up using the noteManager
         app.noteManager.SaveAllNotes()
+        
+        ; Clean up all notes
+        for id, note in app.noteManager.notes {
+            if (!note.Destroy()) {
+                LogError("Failed to destroy note " id " during exit")
+            }
+        }
+        
+        ; Clear the notes collection
+        app.noteManager.notes := Map()
+        
         ExitApp()
+    }
+}
+
+; Helper function for conditional logging
+LogError(message) {
+    if (OptionsConfig.ERROR_LOG) {
+        FileAppend(message "`n", "error_log.txt")
     }
 }

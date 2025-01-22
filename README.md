@@ -22,4 +22,9 @@ If a note's text has multiple lines, and any of those lines start with
 If you change the length of text after the note have already been made, or if you check/uncheck boxes, I recommend doing "Save Status" from the note context menu or the main form.  This will save all notes and properties to the ini file.  Then do "Load/ReLoad Notes" if the note size hasn't adjusted correctly. 
 
 This script is unique because nearly every bit of code was created with AI prompts, then pasted into the ahk editor.  A great deal of human input was needed, but very little of the actual code was human-generated.  Edit: In later versions, more human code was added.
-![Screenshot of Sticky Notes tool](https://github.com/kunkel321/Stickies/blob/main/sticky_note_screenshot.PNG?raw=true)
+![Screenshot of Sticky Notes tool](https://i.imgur.com/j6Kyled.jpeg)
+Screenshot explanation:
+1. Sticky Note. Top is "DragBar." Drag dbar to move note. Double-click dbar to open editor. Right-click note for menu. Alt+Click checkbox items to toggle.
+2. Sticky Note menu.
+3. Note Editor. Most of the formatting options are found here. Make checkbox items as seen in image.
+4. Sticky Notes Manager gui form. It is hidden by default. The hotkey/accelerator key text tips are dynaminically updated if hotkey/acc key are changed.

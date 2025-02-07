@@ -63,7 +63,7 @@ This script was developed primarily through AI-assisted coding, with Claude AI g
 include additional human-written code for enhanced features and bug fixes.. The system tray context menu has a few extra items, such as "Start with Windows."
 
 This script is unique because nearly every bit of code was created with AI prompts, then pasted into the ahk editor.  A great deal of human input was needed, but very little of the actual code was human-generated.  Edit: In later versions, more human code was added.
-![Screenshot of Sticky Notes tool]([https://i.imgur.com/j6Kyled.jpeg](https://github.com/kunkel321/Stickies/blob/main/Screenshot2-6-2025.png))
+![Screenshot of Sticky Notes tool](https://i.imgur.com/6AdAEtZ.png)
 Screenshot explanation:
 1.	Sticky Note. Top/Center is "DragBar." Drag dragbar to move note. Double-click dragbar to open editor. Right-click note for menu. Alt+Click checkbox items to toggle.
 2.	Note Editor. Most of the formatting options are found here. Make checkbox items as seen in image.

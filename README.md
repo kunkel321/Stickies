@@ -8,6 +8,7 @@
 * Repository: https://github.com/kunkel321/Stickies     
 
 Customizable Hotkeys:
+--------------------
 * Ctrl+Shift+N - Create new note
 * Ctrl+Shift+C - Create new note from clipboard text
 * Ctrl+Shift+S - Toggle main window visibility

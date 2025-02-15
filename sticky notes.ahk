@@ -7,65 +7,54 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    2-6-2025
+Version:    2-14-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
-Features and Usage:
-------------------
+Features, Functionality, and Usage:
+-----------------------------------
 - Create sticky notes that persist between script restarts
 - Notes cascade from top-left of screen for better visibility
+- Cascading Positions: New note doesn't fully cover previous note
 - Notes cycle through different pastel background colors automatically
-- Convert text lines starting with [] or [x] into interactive checkboxes
+- Several formatting options including fonts, colors, sizing, and borders
 - Set alarms for individual notes with optional weekly recurrence
-- Rich formatting options including fonts, colors, and sizing
-- Main window with note management and search functionality
-
-Core Functionality:
-------------------
-- Notes are created using Ctrl+Shift+N or from clipboard with Ctrl+Shift+S
+- Main window with note management, preview, and search functionality
+- Access main window with Win+Shift+S (hidden by default)
+- Notes are created using Win+Shift+N or from clipboard with Win+Shift+C
+- Hotkeys can be changed near top of code
+- Tips button in note manager shows hotkeys and other tips
 - Drag notes by their top bar to reposition
-- Double-click top bar or right-click for editing options
 - Notes auto-save position when moved
-- Access main window with Ctrl+Shift+S (hidden by default)
+- Double-click top bar or right-click for editing options
 - System tray icon provides quick access to common functions
-
-Special Features:
-----------------
-- Checkbox Creation: Any line starting with [] or [x] becomes a checkbox
+- Start with Windows: Option available in tray menu
+- Checkbox Creation: Any text line starting with [] or [x] becomes an interactive checkbox
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
 - Alarm System: Set one-time or recurring alarms with custom sounds
-- Note Search: Filter notes by content in main window
-- Color Cycling: Each new note gets next color in palette
-- Cascading Positions: New note doesn't fully cover previous note
-- Start with Windows: Option available in tray menu
-
-Data Management:
----------------
 - All note data saved to sticky_notes.ini in script directory
-- Notes auto-save on most changes
-- Manual save available via "Save Status" button
-- "Load/Reload Notes" refreshes all notes from storage
 - Hidden notes can be restored through main window
 
 Tips:
 -----
-- Use "Save Status" after significant changes
-- "Load/Reload Notes" helps if note display issues occur
+- Use manual "Save Status" after significant changes
+- "Load/Reload Notes" refreshes all notes from storage
 - Check error_log.txt for troubleshooting (if enabled)
-- Use main window's search to find specific notes
-- Right-click menu provides quick access to common functions
+- Use main window's search to find specific notes or filter by hidden/unhidden
+- Right-click menu provides quick access to several functions
+- Preview notes in note manager listview via right-click
 
 Development Note:
 ----------------
 This script was developed primarily through AI-assisted coding, with Claude AI 
 generating most of the base code structure and functionality. Later versions 
 include additional human-written code for enhanced features and bug fixes.
+Thanks go to Hellbent (borderGui class) and Justme (ToolTipOptions, LV_Colors classes)
 */
 
-; ^+N:: Create new note
-; ^+C:: Create new note from clipboard text
-; ^+S:: Toggle main window visibility
+; #+N:: Create new note
+; #+C:: Create new note from clipboard text
+; #+S:: Toggle main window visibility
 
 ; If ColorThemeIntegrator app is present, uses color settings.
 ; Assumes that file is in grandparent folder of this file.
@@ -81,17 +70,18 @@ Else { ; If color app not found, uses these hex codes.
 
 ; Hotkey Configuration.  Change hotkeys if desired.
 class OptionsConfig {
-    static TOGGLE_MAIN_WINDOW   := "^+s"     ; Ctrl+Shift+S
-    static NEW_NOTE             := "^+n"     ; Ctrl+Shift+N
-    static NEW_CLIPBOARD_NOTE   := "^+c"     ; Ctrl+Shift+C
+    static ERROR_LOG            := 0          ; 1 = yes, 0 = no
+    static TOGGLE_MAIN_WINDOW   := "+#s"      ; Shift+Win+S
+    static NEW_NOTE             := "+#n"      ; Shift+Win+N
+    static NEW_CLIPBOARD_NOTE   := "+#c"      ; Shift+Win+C
     static APP_ICON             := "sticky.ico"
     static INI_FILE             := "sticky_notes.ini"
-    static ERROR_LOG            := 0          ; 1 = yes, 0 = no
     static AUTO_OPEN_EDITOR     := 1          ; 1 = yes, 0 = no
     static MAX_NOTE_WORDS       := 200        ; Maximum words in a note
     static MAX_NOTE_LINES       := 35         ; Maximum lines in a note
     ; To prevent accidental checkbox clicks.  Blank "" means don't require modifer.
     static CHECKBOX_MODIFIER_KEY := "Alt" 
+    static DEFAULT_BORDER      := false      ; Whether new notes have borders by default
 }
 
 ; Global Constants
@@ -102,7 +92,7 @@ class StickyNotesConfig {
     static DEFAULT_FONT_SIZE    := 12
     static DEFAULT_FONT_COLOR   := "000000"  ; Black
     
-    ; Color options for notes (expanded pastel shades)
+    ; Color options for notes (expanded pastel shades) new notes assume default color in this order.
     static COLORS := Map(
         "Light Yellow", "FFFFCC",
         "Soft Sky", "B6D9FF",
@@ -308,7 +298,9 @@ class StickyNotes {
     }
 
     CreateNewNote(*) {
+        LogError("Starting CreateNewNote at " A_TickCount "`n")
         noteId := this.noteManager.CreateNote()
+        LogError("CreateNewNote completed at " A_TickCount "`n")
         
         ; Auto-open editor if enabled
         if (OptionsConfig.AUTO_OPEN_EDITOR && noteId) {
@@ -328,7 +320,6 @@ class StickyNotes {
             LogError("Cycle reset for " noteId "`n")
         }
     }
-
 
     CheckAlarms() {
         ; Keep these maps at class level to preserve state
@@ -456,7 +447,7 @@ class StickyNotes {
                     
                     ; Update button text if editor is open
                     if (note.editor) {
-                        note.editor.addAlarmBtn.Text := "Add Alarm..."
+                        note.editor.addAlarmBtn.Text := "Add &Alarm..."
                     }
                     
                     storage := NoteStorage()
@@ -557,8 +548,11 @@ class StickyNotes {
         A_TrayMenu.Add("Open Note ini File", (*) => Run(OptionsConfig.INI_FILE))
 
         A_TrayMenu.Default := appName ; Set default tray icon
-        ;TraySetIcon("imageres.dll",279) ; Yellow sticky with green 'up' arrow
-        TraySetIcon(OptionsConfig.APP_ICON)
+        ; Try to use custom icon first, fall back to system icon if not found
+        if FileExist(OptionsConfig.APP_ICON)
+            TraySetIcon(OptionsConfig.APP_ICON)
+        else
+            TraySetIcon("imageres.dll",279)  ; Yellow sticky with green 'up' arrow
     }
 
     StartUpStickies() {
@@ -578,7 +572,6 @@ class StickyNotes {
         this.noteManager.SaveAllNotes()
         ExitApp()
     }
-    
 }
 
 ; Helper function to join array elements
@@ -593,11 +586,118 @@ Join(arr, delimiter) {
 ; Create and start the application
 global app := StickyNotes()
 
+/*
+BorderGui class for note borders
+Graciously made by HellBent
+https://www.autohotkey.com/boards/viewtopic.php?p=597649&sid=4af1ffa41437ec2526d652565324d494#p597649
+Minor changes made from original.
+*/
+class BorderGui {
+    static init := This._Setup()
+    static Handles := Map()
+    static _Setup() {
+        OnMessage(0x0201, This._ClickEvent.Bind(This))
+    }
+    static _ClickEvent(wParam, lParam, uMsg, hWnd) {
+        if (This.Handles.HasProp(hWNd)) {
+            PostMessage(0xA1, 2)
+            KeyWait("LButton")
+            return 0
+        }
+    }
+
+    __New(GuiObject, borderColor := "0x000000", top := 20, bottom := 5, left := 5, right := 5, activate := 1, isOnTop := false) {
+        if (!IsObject(GuiObject)) {
+            MsgBox("The BorderGui class requires you to pass a gui object.", "Error", 8192)
+            return 0
+        }
+        if (GuiObject.HasProp("HasParent") && GuiObject.HasParent) {
+            MsgBox("The target gui already has a parent window", "Error", 8192)
+            return 0
+        }
+
+        This.Child := GuiObject
+        ; Create border GUI with conditional AlwaysOnTop
+        This.Gui1 := Gui("-Caption +ToolWindow" (isOnTop ? " +AlwaysOnTop" : ""), This.Child.Title)
+        This.Gui1.BackColor := borderColor
+        
+        ; Get child window dimensions
+        w := 0, h := 0, x := 0, y := 0
+        This.Child.GetPos(&x, &y, &w, &h)
+        
+        ; Hide child before reparenting
+        This.Child.Hide()
+        
+        ; Set up parent/child relationship
+        This.Child.Opt("+Parent" This.Gui1.Hwnd)
+        
+        ; Show child with offset for border
+        This.Child.Show("x" left " y" top " w" w " h" h ((activate) ? ("") : (" NA")))
+        This.Child.HasParent := 1
+        
+        ; Calculate border window position and size
+        posW := w + left + right, posH := h + top + bottom
+        posX := x - left, posY := y - top
+        
+        ; Show border window
+        This.Gui1.Show("x" posX " y" posY " w" posW " h" posH)
+        
+        ; Store handle in static map
+        handle := This.Gui1.Hwnd
+        BorderGui.Handles.%handle% := This
+    }
+
+    SetAlwaysOnTop(state) {
+        if (this.Gui1) {
+            this.Gui1.Opt(state ? "+AlwaysOnTop" : "-AlwaysOnTop")
+        }
+    }
+
+    Release() {
+        if (!this.Child || !this.Gui1)
+            return
+            
+        try {
+            ; Get final positions
+            this.Child.GetPos(&xOffset, &yOffset)
+            this.Gui1.GetPos(&parentX, &parentY)
+            
+            ; Calculate absolute position for child
+            absoluteX := parentX + xOffset
+            absoluteY := parentY + yOffset
+            
+            ; Remove parent relationship
+            this.Child.Opt("-Parent")
+            this.Child.HasParent := 0
+            
+            ; Remove from static handles and destroy
+            BorderGui.Handles.DeleteProp(this.Gui1.Hwnd)
+            
+            ; Important: Hide and destroy BEFORE showing child
+            WinSetExStyle(-0x80, this.Gui1)  ; Remove WS_EX_TOOLWINDOW
+            this.Gui1.Destroy()
+            this.Gui1 := ""
+            
+            ; Now show child at correct position
+            this.Child.Show(Format("x{} y{}", absoluteX, absoluteY))
+            this.Child := ""
+        } catch as err {
+            LogError("Error in BorderGui.Release: " err.Message "`n")
+        }
+    }
+
+    __Delete() {
+        this.Release()
+    }
+}
+
 class Note {
     ; Note properties
-    gui := ""            ; Keep this as empty string
-    dragArea := ""       ; Keep this as empty string
+    gui := ""           
+    dragArea := ""    
+    borderGui := ""  
     id := 0
+    hasBorder := false
     content := ""
     bgcolor := ""
     font := ""
@@ -671,6 +771,13 @@ class Note {
         } else {
             this.gui.Show()
         }
+
+        ; Initialize border if needed
+        this.hasBorder := options.HasOwnProp("hasBorder") ? options.hasBorder : OptionsConfig.DEFAULT_BORDER
+        if (this.hasBorder) {
+            thickness := this.isBold ? 4 : 2
+            this.borderGui := BorderGui(this.gui, this.fontColor, thickness, thickness, thickness, thickness, 1)
+        }
         
         ; Set up events
         this.SetupEvents()
@@ -714,7 +821,7 @@ class Note {
             if (item.type == "checkbox") {
                 ; Create checkbox with proper font color
                 cb := this.gui.Add("Checkbox",
-                    "y" currentY " x5 w" this.width " c" this.fontColor,  ; Add color directly in options
+                    "y" currentY " x5 w" this.width " -wrap c" this.fontColor,  ; Add color directly in options
                     item.text)
                 cb.Value := item.checked
                 
@@ -823,8 +930,8 @@ class Note {
         this.Edit()
     }
 
-    isBeingDeleted := false
     ; for when a note gui loses focus.
+    isBeingDeleted := false
     WM_ACTIVATE(wParam, lParam, msg, hwnd) {
         try {
             ; First verify we have a valid GUI
@@ -834,11 +941,24 @@ class Note {
             
             ; Then check if it's our window losing focus
             if (hwnd = this.gui.Hwnd && wParam = 0) {
+                ; Get the correct position to save
+                x := 0
+                y := 0
+                if (this.borderGui && this.borderGui.Gui1) {
+                    ; If bordered, save the border GUI's position
+                    this.borderGui.Gui1.GetPos(&x, &y)
+                } else {
+                    ; If not bordered, save the note's position
+                    this.gui.GetPos(&x, &y)
+                }
+                
                 ; Only save if the note still exists in storage
                 storage := NoteStorage()
                 if (storage.NoteExists(this.id)) {
+                    this.currentX := x
+                    this.currentY := y
                     storage.SaveNote(this)
-                    LogError("Saved position for note " this.id " after losing focus`n")
+                    LogError("Saved position for note " this.id " after losing focus: x=" x ", y=" y "`n")
                 } else {
                     LogError("Note " this.id " no longer exists - skipping position save`n")
                 }
@@ -849,18 +969,17 @@ class Note {
     }
 
     StartDrag(*) {
-        
         SetWinDelay(-1)
         CoordMode("Mouse", "Screen")
         
-        startWinX := 0
-        startWinY := 0
-        startMouseX := 0
-        startMouseY := 0
-        currentMouseX := 0
-        currentMouseY := 0
+        startWinX := 0, startWinY := 0
+        startMouseX := 0, startMouseY := 0
+        currentMouseX := 0, currentMouseY := 0
         
-        WinGetPos(&startWinX, &startWinY, , , this.gui)
+        ; Determine which window to move based on whether we have a border
+        targetGui := this.borderGui ? this.borderGui.Gui1 : this.gui
+        
+        WinGetPos(&startWinX, &startWinY, , , targetGui)
         MouseGetPos(&startMouseX, &startMouseY)
         
         while GetKeyState("LButton", "P") {
@@ -868,7 +987,7 @@ class Note {
             WinMove(
                 startWinX + (currentMouseX - startMouseX),
                 startWinY + (currentMouseY - startMouseY),
-                , , this.gui
+                , , targetGui
             )
         }
         
@@ -884,6 +1003,7 @@ class Note {
         noteMenu := Menu()
         noteMenu.Add("Edit this Note", this.Edit.Bind(this))
         noteMenu.Add("Hide this Note", this.Hide.Bind(this))
+        noteMenu.Add("Delete this Note", this.Delete.Bind(this))
         noteMenu.Add()
         ; Add alarm-related items if note has an alarm
         if (this.hasAlarm) {
@@ -987,28 +1107,42 @@ class Note {
 
     DeleteAlarm(*) {
         if (MsgBox("Are you sure you want to delete this alarm?",, "YesNo") = "Yes") {
-            this.hasAlarm := false
-            this.alarmTime := ""
-            this.alarmSound := ""
-            this.alarmDays := ""
-            this.alarmRepeatCount := 1
-            
-            ; Force reset of cycle state
-            StickyNotes.cycleComplete.Delete(this.id)
-            
-            ; Save changes to storage
-            storage := NoteStorage()
-            storage.SaveNote(this)
-            
-            ; If note editor is open, update its display
-            if (this.editor) {
-                this.editor.CreateGui()
-                this.editor.Show()
+            try {
+                this.hasAlarm := false
+                this.alarmTime := ""
+                this.alarmSound := ""
+                this.alarmDays := ""
+                this.alarmRepeatCount := 1
+                
+                ; Force reset of cycle state - only if key exists
+                if (StickyNotes.cycleComplete && StickyNotes.cycleComplete.Has(this.id)) {
+                    StickyNotes.cycleComplete.Delete(this.id)
+                }
+                
+                ; Save changes to storage
+                storage := NoteStorage()
+                storage.SaveNote(this)
+                
+                ; If note editor is open, update the alarm button text
+                if (this.editor) {
+                    this.editor.addAlarmBtn.Text := "Add &Alarm..."
+                }
+            } catch Error as err {
+                LogError("Error in Note.DeleteAlarm: " err.Message "`n")
             }
         }
     }
 
     UpdateContent(newContent, options := "") {
+        ; Store current position and border state
+        x := 0
+        y := 0
+        if (this.borderGui && this.borderGui.Gui1) {
+            this.borderGui.Gui1.GetPos(&x, &y)
+        } else {
+            this.gui.GetPos(&x, &y)
+        }
+        
         ; Update properties
         this.content := newContent
         if (options) {
@@ -1024,14 +1158,15 @@ class Note {
                 this.isOnTop := !!options.isOnTop  ; Force boolean
             if (options.HasOwnProp("width"))
                 this.width := options.width
+            if (options.HasOwnProp("hasBorder"))
+                this.hasBorder := options.hasBorder
         }
         
-        ; Store current position
-        x := 0
-        y := 0
-        this.gui.GetPos(&x, &y)
-        
-        ; Destroy old GUI and create new one
+        ; Destroy old GUI components
+        if (this.borderGui) {
+            this.borderGui.Release()
+            this.borderGui := ""
+        }
         this.gui.Destroy()
         
         ; Create new GUI with current AlwaysOnTop setting
@@ -1048,7 +1183,7 @@ class Note {
             "x0 y0 w" this.width " h20 Background" this.bgcolor)
             
         ; Set default font
-        this.gui.SetFont("s" this.fontSize, this.font)
+        this.gui.SetFont("s" this.fontSize (this.isBold ? " bold" : ""), this.font)
         
         ; Create note content
         if (InStr(this.content, "[]") || InStr(this.content, "[x]")) {
@@ -1057,8 +1192,14 @@ class Note {
             this.CreateSimpleNote()
         }
         
-        ; Show GUI at previous position
-        this.gui.Show("x" x " y" y)
+        ; First show the note GUI to establish its size
+        this.gui.Show(Format("x{} y{}", x, y))
+        
+        ; Then handle border if needed
+        if (this.hasBorder) {
+            thickness := this.isBold ? 4 : 2
+            this.borderGui := BorderGui(this.gui, this.fontColor, thickness, thickness, thickness, thickness, 1, this.isOnTop)
+        }
         
         ; Set up events again
         this.SetupEvents()
@@ -1066,6 +1207,7 @@ class Note {
         ; Update stored position
         this.UpdatePosition()
     }
+
 
     ValidatePosition(x, y) {
         try {
@@ -1081,25 +1223,58 @@ class Note {
     }
 
     Hide(*) {
-        this.gui.Hide()
+        if (this.borderGui && this.borderGui.Gui1) {
+            ; If note has a border, hide the border GUI (child will hide automatically)
+            this.borderGui.Gui1.Hide()
+        } else {
+            ; If no border, just hide the note
+            this.gui.Hide()
+        }
         storage := NoteStorage()
         storage.MarkNoteHidden(this.id)
     }
     
     Show(*) {
-        this.gui.Show()
+        if (this.borderGui && this.borderGui.Gui1) {
+            ; If note has a border, show the border GUI (child will show automatically)
+            this.borderGui.Gui1.Show()
+        } else {
+            ; If no border, just show the note
+            this.gui.Show()
+        }
     }
     
     Delete(*) {
         if (MsgBox("Are you sure you want to delete this note?",, "YesNo") = "Yes") {
-            ; Use the app's noteManager to delete this note
-            app.noteManager.DeleteNote(this.id)
+            try {
+                ; Clean up alarm state if it exists
+                if (this.hasAlarm && StickyNotes.cycleComplete && StickyNotes.cycleComplete.Has(this.id)) {
+                    StickyNotes.cycleComplete.Delete(this.id)
+                }
+
+                ; Clean up border if it exists
+                if (this.borderGui) {
+                    this.borderGui.Release()
+                    this.borderGui := ""
+                }
+
+                ; Use the app's noteManager to delete this note
+                app.noteManager.DeleteNote(this.id)
+            } catch Error as err {
+                LogError("Error in Note.Delete: " err.Message "`n")
+            }
         }
     }
     
     Destroy(*) {
         try {
-            ; First clean up event bindings
+            ; First clean up border if it exists
+            if (this.borderGui) {
+                this.borderGui.Release()
+                this.borderGui := ""
+            }
+
+            ; Then clean up event bindings
             if (this.dragArea) {
                 this.dragArea.OnEvent("Click", this.StartDrag.Bind(this), 0)
                 this.dragArea.OnEvent("DoubleClick", this.DoubleClickHandler.Bind(this), 0)
@@ -1207,7 +1382,7 @@ class NoteManager {
     }
     
         ; Static properties for cascade positioning
-    static CASCADE_OFFSET := 20      ; Pixels to offset each new note
+    static CASCADE_OFFSET := 75      ; Pixels to offset each new note
     static MAX_CASCADE := 10         ; Maximum number of cascaded notes before reset
     static currentCascadeCount := 0  ; Track number of cascaded notes
     static baseX := ""              ; Base X position (will be set on first use)
@@ -1284,8 +1459,11 @@ class NoteManager {
             newNote := Note(newId, options)
             this.notes[newId] := newNote
             
-            ; Save initial state
-            this.storage.SaveNote(newNote)
+            ; Only save initial state if this isn't a new blank note
+            if (options.HasOwnProp("content") && options.content != "Right-click here, or double-click header, to edit. Drag header to move.") {
+                this.storage.SaveNote(newNote)
+            }
+            
             if (this.mainWindow)
                 this.mainWindow.PopulateNoteList()
             return newId
@@ -1504,7 +1682,6 @@ class NoteManager {
 }
 
 class NoteStorage {
-
     ; Helper method to generate note section name
     GetNoteSectionName(id) {
         return "Note-" id
@@ -1543,6 +1720,7 @@ class NoteStorage {
             ; Save settings
             IniWrite(note.isOnTop, OptionsConfig.INI_FILE, sectionName, "IsOnTop")
             IniWrite(note.width, OptionsConfig.INI_FILE, sectionName, "Width")
+            IniWrite(note.hasBorder, OptionsConfig.INI_FILE, sectionName, "HasBorder")
 
             IniWrite(note.hasAlarm, OptionsConfig.INI_FILE, sectionName, "HasAlarm")
             if (note.hasAlarm) {
@@ -1589,6 +1767,7 @@ class NoteStorage {
                 isOnTop: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "IsOnTop", "0")),
                 width: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "Width", StickyNotesConfig.DEFAULT_WIDTH)),
                 isHidden: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "Hidden", "0")),
+                hasBorder: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "HasBorder", OptionsConfig.DEFAULT_BORDER)),
                 hasAlarm: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "HasAlarm", "0")),
                 alarmTime: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmTime", ""),
                 alarmSound: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmSound", ""),
@@ -1773,7 +1952,6 @@ class NoteStorage {
     }
 }
 
-
 class NoteEditor {
     ; Editor properties
     note := ""
@@ -1853,8 +2031,8 @@ class NoteEditor {
         boldCB.OnEvent("Click", (*) => this.UpdateBold(boldCB.Value))
         
         ; Font color dropdown
-        this.gui.Add("Text", "x15 y+10", "Font Color:")
-        fontColorDropdown := this.gui.Add("DropDownList", "x+5 yp-3 w100", this.GetFontColorList())
+        this.gui.Add("Text", "x15 y+10", "Font:")
+        fontColorDropdown := this.gui.Add("DropDownList", "x+5 yp-3 w80", this.GetFontColorList())
         fontColorDropdown.Text := this.GetFontColorName(this.note.fontColor)
         fontColorDropdown.OnEvent("Change", (*) => this.UpdateFontColor(fontColorDropdown.Text))
     }
@@ -1930,12 +2108,12 @@ class NoteEditor {
         editorWidth := Max(this.note.width, 200)  ; Use note width but minimum of 200
         ; Add Note Options group
         this.gui.Add("GroupBox", 
-            "x5 y+10 w" (editorWidth - 10) " h70",  ; Made taller for both controls
+            "x5 y+15 w" (editorWidth - 10) " h95",  ; Made taller for both controls
             "Note Options")
 
         ; Add alarm button
         addAlarmBtnText := this.note.hasAlarm 
-            ? this.note.alarmTime  (this.note.alarmDays ?  "-" this.note.alarmDays : "") : "Add Alarm..."
+            ? this.note.alarmTime  (this.note.alarmDays ?  "-" this.note.alarmDays : "") : "Add &Alarm..."
         this.addAlarmBtn := this.gui.Add("Button", "xp+6 yp+16 w" (editorWidth - 25), addAlarmBtnText)
         this.addAlarmBtn.OnEvent("Click", this.ShowAlarmDialog.Bind(this))
         
@@ -1945,10 +2123,18 @@ class NoteEditor {
         widthUpDown := this.gui.Add("UpDown", "Range50-500", this.note.width)
         this.widthEdit.OnEvent("Change", (*) => this.UpdateWidth(this.widthEdit.Value))
         
+        
         ; Add Always on Top checkbox below
-        alwaysOnTopCB := this.gui.Add("Checkbox", "x+20 y+-24", "Always`non Top")
+        alwaysOnTopCB := this.gui.Add("Checkbox", "xp-35 yp+30", "Always on Top")
         alwaysOnTopCB.Value := this.note.isOnTop
         alwaysOnTopCB.OnEvent("Click", (*) => this.ToggleAlwaysOnTop(alwaysOnTopCB.Value))
+
+        
+        ; Border option
+        borderCB := this.gui.Add("Checkbox", "x+10", "Border")
+        borderCB.Value := this.note.hasBorder
+        borderCB.OnEvent("Click", (*) => this.UpdateBorder(borderCB.Value))
+
         
         this.gui.Add("Button", "x5 y+15 w60", "&Save")
             .OnEvent("Click", (*) => this.Save())
@@ -1970,6 +2156,9 @@ class NoteEditor {
     ; And update the ToggleAlwaysOnTop method to actually set the property
     ToggleAlwaysOnTop(value) {
         this.note.isOnTop := value ? true : false
+        if (this.note.borderGui) {
+            this.note.borderGui.SetAlwaysOnTop(value)
+        }
     }
 
     UpdateWidth(newWidth) {
@@ -1980,12 +2169,16 @@ class NoteEditor {
         this.note.width := width
         this.editorWidth := width
     }
+
+    UpdateBorder(hasBorder) {
+        this.note.hasBorder := hasBorder
+    }
     
     Save(*) {
         ; Get current content
         newContent := this.editControl.Text
         
-        ; Update note with all properties including width
+        ; Update note with properties
         this.note.UpdateContent(newContent, {
             bgcolor: this.note.bgcolor,
             font: this.note.font,
@@ -1993,8 +2186,8 @@ class NoteEditor {
             isBold: this.note.isBold,
             fontColor: this.note.fontColor,
             isOnTop: this.note.isOnTop,  
-            ;width: widthEdit.Value,
             width: this.widthEdit.Value,
+            hasBorder: this.note.hasBorder,
             hasAlarm: this.note.hasAlarm,
             alarmTime: this.note.alarmTime,
             alarmSound: this.note.alarmSound,
@@ -2002,13 +2195,11 @@ class NoteEditor {
             alarmRepeatCount: this.note.alarmRepeatCount
         })
 
-        
-        ; Save to storage immediately
+        ; Save to storage
         (NoteStorage()).SaveNote(this.note)
         
         this.gui.Destroy()
         this.CreateGui()
-        ;this.Show() 
     }
 
     DeleteNote(*) {
@@ -2053,14 +2244,6 @@ class NoteEditor {
     }
 }
 
-; FormatHotkeyForDisplay(hotkeyStr) {
-;     return (InStr(hotkeyStr, "^") ? "Ctrl+" : "")
-;         . (InStr(hotkeyStr, "+") ? "Shift+" : "")
-;         . (InStr(hotkeyStr, "!") ? "Alt+" : "")
-;         . (InStr(hotkeyStr, "#") ? "Win+" : "")
-;         . StrUpper(SubStr(hotkeyStr, RegExMatch(hotkeyStr, "[a-zA-Z0-9]")))
-; }
-
 class AlarmDialog {
     gui := ""
     note := ""
@@ -2104,7 +2287,7 @@ class AlarmDialog {
         this.soundDropDown := this.gui.AddDropDownList("x+5 yp-3 w200 Background" listColor, AlarmConfig.GetSoundFiles())
         this.soundDropDown.Choose(1)
         
-        testButton := this.gui.AddButton("x+5 yp w50 h24", "Test")
+        testButton := this.gui.AddButton("x+5 yp-2 w45 h24", "Test")
         testButton.OnEvent("Click", this.TestSound.Bind(this))
 
         ; Repeat options in AlarmDialog's CreateGui method
@@ -2152,7 +2335,8 @@ class AlarmDialog {
         }
     }
 
-    UpdateMinuteFormat(*) {
+    UpdateMinuteFormat(*) { ; Pads zeros and single digits. 00, 01, ... 09.
+        sleep 500 ; The sleep allows time to type e.g. "30" without getting "03".
         try {
             value := Integer(this.minuteEdit.Value)
             if (value >= 0 && value < 10)
@@ -2162,7 +2346,7 @@ class AlarmDialog {
         }
     }
 
-    CheckAMPM(*) {
+    CheckAMPM(*) { ; Sets AM/PM based on hour
         val := Integer(this.hourEdit.Value)
         if (val >= 5 && val <= 11)
             this.gui["AM"].Value := 1
@@ -2266,41 +2450,47 @@ class AlarmDialog {
         storage := NoteStorage()
         storage.SaveNote(this.note)
 
-        ; If note editor is open, just update the alarm button text
+        ; If note editor is open, update the alarm button text
         if (this.note.editor) {
-            buttonText := this.note.hasAlarm 
-                ? this.note.alarmTime (this.note.alarmDays ? " - " this.note.alarmDays : "")
-                : "Add Alarm..."
-            this.note.editor.addAlarmBtn.Text := buttonText
-        }
+        buttonText := this.note.hasAlarm 
+            ? "&A: " this.note.alarmTime (this.note.alarmDays ? " - " this.note.alarmDays : "")
+            : "Add &Alarm..."
+        this.note.editor.addAlarmBtn.Text := buttonText
+    }
 
         ; Close dialog
         this.Destroy()
     }
 
     DeleteAlarm(*) {
-        if (MsgBox("Are you sure you want to delete this alarm?",, "YesNo 0x40000") = "Yes") {
-            ; Reset alarm properties
-            this.note.hasAlarm := false
-            this.note.alarmTime := ""
-            this.note.alarmSound := ""
-            this.note.alarmDays := ""
-            this.note.alarmRepeatCount := 1
-            
-            ; Force reset of cycle state
-            app.ResetNoteAlarmCycle(this.note.id)
-            
-            ; Save changes to storage
-            storage := NoteStorage()
-            storage.SaveNote(this.note)
-            
-            ; If note editor is open, update the alarm button text
-            if (this.note.editor) {
-                this.note.editor.addAlarmBtn.Text := "Add Alarm..."
+        try {
+            if (MsgBox("Are you sure you want to delete this alarm?",, "YesNo 0x40000") = "Yes") {
+                ; Reset alarm properties
+                this.note.hasAlarm := false
+                this.note.alarmTime := ""
+                this.note.alarmSound := ""
+                this.note.alarmDays := ""
+                this.note.alarmRepeatCount := 1
+                
+                ; Force reset of cycle state
+                if (StickyNotes.cycleComplete && StickyNotes.cycleComplete.Has(this.note.id)) {
+                    StickyNotes.cycleComplete.Delete(this.note.id)
+                }
+                
+                ; Save changes to storage
+                storage := NoteStorage()
+                storage.SaveNote(this.note)
+                
+                ; If note editor is open, update the alarm button text
+                if (this.note.editor) {
+                    this.note.editor.addAlarmBtn.Text := "Add &Alarm..."
+                }
+                
+                ; Close alarm dialog
+                this.Destroy()
             }
-            
-            ; Close alarm dialog
-            this.Destroy()
+        } catch Error as err {
+            LogError("Error in AlarmDialog.DeleteAlarm: " err.Message "`n")
         }
     }
 
@@ -2327,6 +2517,14 @@ class AlarmDialog {
     }
 }
 
+/*
+Colorized rows in ListView.
+Based on Justme's Class LV_Colors
+https://www.autohotkey.com/boards/viewtopic.php?t=93922
+Claude was instructed to remove the parts of the class that prevent 
+sorting/filtering, alow alternating colors, and allow column customization.
+It was told to only keep the part for colorizing individual rows.
+*/
 Class LV_Colors {
     __New(LV) {
         this.LV := LV
@@ -2421,19 +2619,22 @@ class MainWindow {
 
         this.gui.setFont("s" helpTextFont + 1 " w700")
         this.gui.SetFont("c" fontColor)
-        this.gui.Add("Text", "Center x10 y10 w" totalWidth, "Sticky Notes Manager")
+        this.gui.Add("Text", " x150 y10", "Sticky Notes Manager")
         this.gui.setFont("s" helpTextFont " w400")
+        this.gui.Add("Button", " x+85 y10 h25 w40 ", "Tips")
+            .OnEvent("Click", (*) => this.ShowTips())
+
         ; Add separator
         this.gui.Add("Text", "x10 y+10 w" totalWidth " h2 0x10")  ; Horizontal line
 
         ; Create button group 1 - Core Functions
-        this.gui.Add("Button", "x10 y+10 w" buttonW " h30", "New Note")
+        this.gui.Add("Button", "x10 y+10 w" buttonW " h30", "&New Note")
             .OnEvent("Click", (*) => app.noteManager.CreateNote())
         
         this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "New From Clpbrd")
             .OnEvent("Click", (*) => app.CreateClipboardNote())
             
-        this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Load Notes")
+        this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "&Load Notes")
             .OnEvent("Click", (*) => app.noteManager.LoadSavedNotes())
             
         this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "Show Hidden")
@@ -2464,7 +2665,7 @@ class MainWindow {
 
         ; Create ListView with columns
         this.noteList := this.gui.Add("ListView", 
-            "x10 y+5 w" totalWidth " h200 -Multi Background" listColor, 
+            "x10 y+5 w" totalWidth " h200 Background" listColor, 
             ["Created", "Note Contents", "Alarm"])
 
         ; Set column widths
@@ -2475,37 +2676,53 @@ class MainWindow {
         ; Create color handler instance
         this.CLV := LV_Colors(this.noteList)
 
-        ; Add double-click handler
+        ;  handlers
         this.noteList.OnEvent("DoubleClick", this.EditSelectedNote.Bind(this))
+        this.noteList.OnEvent("ContextMenu", this.HandleClick.Bind(this))
 
         buttonY := "y+10"
         this.gui.Add("Button", "x10 " buttonY " w" buttonW " h30", "Edit Note")
             .OnEvent("Click", (*) => this.EditSelectedNote())
         this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "Bring Forward")
             .OnEvent("Click", (*) => this.ShowSelectedNote())
-        this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Delete Note")
+        this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "&Delete Note")
             .OnEvent("Click", (*) => this.DeleteSelectedNote())
-        this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "Hide Note")
+        this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "&Hide Note")
             .OnEvent("Click", (*) => this.HideSelectedNote())
-        this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "Unhide Note")
+        this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "&Unhide Note")
             .OnEvent("Click", (*) => this.UnhideSelectedNote())
         this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Open ini file")
             .OnEvent("Click", (*) => Run(OptionsConfig.INI_FILE))
-
-        ; Add help text at bottom with full width
-        ; this.gui.Add("Text", "x10 y+10 w" (buttonW * 2 + spacing) " h2 0x10")  ; Horizontal line
-        ; helpText :=  FormatHotkeyForDisplay(OptionsConfig.NEW_NOTE) " = New Note`n"
-        ;     . FormatHotkeyForDisplay(OptionsConfig.NEW_CLIPBOARD_NOTE) " = Clipboard Note`n"
-        ;     . FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) " = Show/Hide Window"
-        ;     . (OptionsConfig.CHECKBOX_MODIFIER_KEY? "`n" OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click = Toggle Checkbox" : "")
-        ; this.gui.Add("Text", "x10 y+10 w" (buttonW * 2 + spacing), helpText)
         
         ; Set up events
-        this.gui.OnEvent("Close", (*) => this.ExitApp())
+        this.gui.OnEvent("Close", (*) => this.Hide())
         this.gui.OnEvent("Escape", (*) => this.Hide())
     }
-    
+
+    ShowTips(*) {
+        helpText :=  "~~~Customizable Hotkeys~~~`n"
+            . FormatHotkeyForDisplay(OptionsConfig.NEW_NOTE) " = New Note`n"
+            . FormatHotkeyForDisplay(OptionsConfig.NEW_CLIPBOARD_NOTE) " = Clipboard Note`n"
+            . FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) " = Show/Hide Window`n"
+            . (OptionsConfig.CHECKBOX_MODIFIER_KEY? OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click = Toggle Checkbox in sticky note`n`n" : "`n")
+            . "~~~Tips for Sticky Note Manager~~~`n"
+            . "Select list item, then double-click for editor.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  Let previous disappear before viewing the next one. Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, or deleted.`n`n"
+            . "~~~Tips for Sticky Notes~~~`n"
+            . "If an alarm is playing, you can right-click the sticky note gui for a 'Stop Alarm' command.  The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area."
+        
+        msgbox(helpText,"Help Tips", "Owner" this.gui.Hwnd)
+        
+        FormatHotkeyForDisplay(hotkeyStr) {
+        return (InStr(hotkeyStr, "^") ? "Ctrl+" : "")
+            . (InStr(hotkeyStr, "+") ? "Shift+" : "")
+            . (InStr(hotkeyStr, "!") ? "Alt+" : "")
+            . (InStr(hotkeyStr, "#") ? "Win+" : "")
+            . StrUpper(SubStr(hotkeyStr, RegExMatch(hotkeyStr, "[a-zA-Z0-9]")))
+        }
+    }
+
     PopulateNoteList() {
+        LogError("Starting PopulateNoteList at " A_TickCount "`n")
         this.noteList.Delete()
         this.noteRowMap.Clear()
         
@@ -2542,53 +2759,176 @@ class MainWindow {
                 "0x" noteData.bgcolor,
                 "0x" noteData.fontColor)
         }
-    }
 
-    GetSelectedNoteId() {
-        if (selected := this.noteList.GetNext())
-            return this.noteRowMap[selected]
-        return ""
-    }
-
-    EditSelectedNote(*) {
-        if (noteId := this.GetSelectedNoteId())
-            if app.noteManager.notes.Has(noteId)
-                app.noteManager.notes[noteId].Edit()
-    }
-
-    ShowSelectedNote(*) {
-        if (noteId := this.GetSelectedNoteId())
-            if app.noteManager.notes.Has(noteId)
-                app.noteManager.notes[noteId].Show()
-    }
-
-    DeleteSelectedNote(*) {
-        if (noteId := this.GetSelectedNoteId()) {
-            app.noteManager.DeleteNote(noteId)
-            this.PopulateNoteList()
+        LogError("PopulateNoteList completed at " A_TickCount "`n")
+        ; Select the last row if any rows exist
+        if (lastRow := this.noteList.GetCount()) {
+            this.noteList.Modify(lastRow, "Select Focus")
         }
     }
 
-    HideSelectedNote(*) {
-        if (noteId := this.GetSelectedNoteId()) {
-            if app.noteManager.notes.Has(noteId) {
-                app.noteManager.notes[noteId].Hide()
-                this.PopulateNoteList()
+    HandleClick(ctrl, info*) {
+        static tooltipShowing := false
+        
+        try {
+            ; Get selected row
+            row := this.noteList.GetNext(0)  
+            if (!row || !this.noteRowMap.Has(row))
+                return
+                
+            ; Get note data from storage
+            storage := NoteStorage()
+            noteData := storage.LoadNote(this.noteRowMap[row])
+            if (!noteData)
+                return
+                
+            ; Initialize tooltip system if needed
+            static tooltipInitialized := false
+            if (!tooltipInitialized) {
+                ToolTipOpts.Init()
+                tooltipInitialized := true
+            }
+            
+            ; Clean up content
+            content := StrReplace(noteData.content, "`r`n", "`n")  
+            content := StrReplace(content, "`r", "`n")    
+            
+            ; Set tooltip formatting
+            ToolTipOpts.SetColors(noteData.bgcolor, noteData.fontColor)
+            ToolTipOpts.SetFont(noteData.fontSize, noteData.font, noteData.isBold)
+            ToolTipOpts.SetMaxWidth(noteData.width + 40)
+            
+            ; Debug logging
+            LogError("Showing tooltip for note " this.noteRowMap[row] "`n"
+                . "  Font: " noteData.font " Size: " noteData.fontSize 
+                . " Bold: " noteData.isBold "`n"
+                . "  Colors - Bg: #" noteData.bgcolor " Font: #" noteData.fontColor "`n")
+            
+            ; Show tooltip
+            ToolTip(content)
+            tooltipShowing := true
+            
+            ; Set up timer to hide tooltip after 2 seconds
+            SetTimer () => (ToolTip(), tooltipShowing := false), -2000
+            
+        } catch Error as err {
+            LogError("Error in HandleClick: " err.Message "`n")
+            ToolTip()
+            tooltipShowing := false
+        }
+    }
+
+    GetSelectedNoteIds() {
+        selectedIds := []
+        row := 0
+        while (row := this.noteList.GetNext(row)) {
+            if (this.noteRowMap.Has(row))
+                selectedIds.Push(this.noteRowMap[row])
+        }
+        return selectedIds
+    }
+
+    EditSelectedNote(*) {
+        selectedIds := this.GetSelectedNoteIds()
+        if (selectedIds.Length = 0)
+            return
+            
+        if (selectedIds.Length > 1) {
+                MsgBox("Please select only one note to edit.", "Edit Note", "Icon! Owner" this.gui.Hwnd)
+            return
+        }
+        
+        if app.noteManager.notes.Has(selectedIds[1])
+            app.noteManager.notes[selectedIds[1]].Edit()
+    }
+
+    ShowSelectedNote(*) {
+        selectedIds := this.GetSelectedNoteIds()
+        if (selectedIds.Length = 0)
+            return
+            
+        for noteId in selectedIds {
+            if app.noteManager.notes.Has(noteId)
+                app.noteManager.notes[noteId].Show()
+        }
+    }
+
+    DeleteSelectedNote(*) {
+        selectedIds := this.GetSelectedNoteIds()
+        if (selectedIds.Length = 0)
+            return
+            
+        if (selectedIds.Length = 1) {
+            ; Single note deletion - show preview
+            storage := NoteStorage()
+            noteData := storage.LoadNote(selectedIds[1])
+            if (noteData) {
+                preview := noteData.content
+                if (StrLen(preview) > 500)
+                    preview := SubStr(preview, 1, 497) "..."
+                
+                if (MsgBox("Are you sure you want to delete this note?`n`nContent:`n" preview,
+                    "Delete Note", "YesNo 0x30 Owner" this.gui.Hwnd) = "Yes") {
+                    this.gui.Opt("+Disabled")  ; Prevent user interaction during deletion
+                    app.noteManager.DeleteNote(selectedIds[1])
+                    this.gui.Opt("-Disabled")  ; Re-enable user interaction
+                    this.PopulateNoteList()    ; Single refresh
+                }
+            }
+        } else {
+            ; Multiple note deletion
+            if (MsgBox("Are you sure you want to delete " selectedIds.Length " notes?",
+                "Delete Multiple Notes", "YesNo 0x30 Owner" this.gui.Hwnd) = "Yes") {
+                ; Temporarily disable list updates
+                this.gui.Opt("+Disabled")  ; Prevent user interaction during deletion
+                
+                ; Modify NoteManager.DeleteNote to not trigger listview updates
+                needsRefresh := this.noteList.Visible  ; Store listview visibility state
+                if (needsRefresh)
+                    this.noteList.Visible := false
+                    
+                for noteId in selectedIds
+                    app.noteManager.DeleteNote(noteId)
+                    
+                ; Restore listview and do single refresh
+                if (needsRefresh) {
+                    this.noteList.Visible := true
+                    this.PopulateNoteList()    ; Single refresh after all deletions
+                }
+                
+                this.gui.Opt("-Disabled")  ; Re-enable user interaction
             }
         }
     }
 
-    UnhideSelectedNote(*) {
-        if (noteId := this.GetSelectedNoteId()) {
-            app.noteManager.RestoreNote(noteId)
-            this.PopulateNoteList()
+    HideSelectedNote(*) {
+        selectedIds := this.GetSelectedNoteIds()
+        if (selectedIds.Length = 0)
+            return
+            
+        for noteId in selectedIds {
+            if app.noteManager.notes.Has(noteId)
+                app.noteManager.notes[noteId].Hide()
         }
+        this.PopulateNoteList()
+    }
+
+    UnhideSelectedNote(*) {
+        selectedIds := this.GetSelectedNoteIds()
+        if (selectedIds.Length = 0)
+            return
+            
+        for noteId in selectedIds
+            app.noteManager.RestoreNote(noteId)
+        this.PopulateNoteList()
     }
 
     Show(*) {
         this.PopulateNoteList()
         ; Position window near top of screen
         this.gui.Show("AutoSize y50")
+        ; Focus the ListView by default
+        this.noteList.Focus()
     }
     
     Hide(*) {
@@ -2614,6 +2954,130 @@ class MainWindow {
         app.noteManager.notes := Map()
         
         ExitApp()
+    }
+}
+
+/*
+CLASS TOOLTIPOPTS
+The code (much like that name) is a subset of, and 
+based directly from, Justme's 'class TooltipOptions' here
+https://www.autohotkey.com/boards/viewtopic.php?f=83&t=113308
+Distilled by kunkel321, using Claude AI on 2-9-2025.
+It keeps the parts of Justme's code that does colors and font size and style.
+Adds ability to set width of tooltips and bold font.
+*/
+Class ToolTipOpts {
+    Static HTT := DllCall("User32.dll\CreateWindowEx", "UInt", 8, "Str", "tooltips_class32", "Ptr", 0, "UInt", 3
+                        , "Int", 0, "Int", 0, "Int", 0, "Int", 0, "Ptr", A_ScriptHwnd, "Ptr", 0, "Ptr", 0, "Ptr", 0) ;*HTT = Handle to ToolTip (the window handle for the tooltip control)
+    Static SWP := CallbackCreate(ObjBindMethod(ToolTipOpts, "_WNDPROC_"), , 4) ;*SWP = SubclassWindowProc (the callback function for window subclassing)
+    Static OWP := 0, ToolTips := Map() ; *OWP = Original Window Proc (stores the original window procedure)
+    ; Properties
+    Static BkgColor := "", TxtColor := "", HFONT := 0, MaxWidth := 0 ; *HFONT = Handle to Font
+
+    Static Call(*) => False
+    Static Init() {
+        If (This.OWP = 0) {
+            This.BkgColor := "", This.TxtColor := ""
+            If (A_PtrSize = 8)
+                This.OWP := DllCall("User32.dll\SetClassLongPtr", "Ptr", This.HTT, "Int", -24, "Ptr", This.SWP, "UPtr")
+            Else
+                This.OWP := DllCall("User32.dll\SetClassLongW", "Ptr", This.HTT, "Int", -24, "Int", This.SWP, "UInt")
+            OnExit(ToolTipOpts._EXIT_, -1)
+            Return This.OWP
+        }
+        Return False
+    }
+    
+    Static SetColors(BkgColor := "", TxtColor := "") {
+        This.BkgColor := BkgColor = "" ? "" : This.BGR(BkgColor)
+        This.TxtColor := TxtColor = "" ? "" : This.BGR(TxtColor)
+    }
+    
+    Static BGR(Color, Default := "") {
+        Static HTML := {BLACK: 0x000000, WHITE: 0xFFFFFF, RED: 0x0000FF, GREEN: 0x00FF00, BLUE: 0xFF0000}
+        
+        If HTML.HasProp(Color)
+            Return HTML.%Color%
+        If (Color Is String) && IsXDigit(Color) && (StrLen(Color) = 6)
+            Color := Integer("0x" . Color)
+        If IsInteger(Color)
+            Return ((Color >> 16) & 0xFF) | (Color & 0x00FF00) | ((Color & 0xFF) << 16)
+        Return Default
+    }
+    
+    Static SetFont(Size := "", FontName := "", Bold := False) {  ; Added Bold parameter
+        Static LOGFONTW := Buffer(92, 0)
+        Static HDEF := DllCall("GetStockObject", "Int", 17, "UPtr")
+        
+        If (Size = "") && (FontName = "") {
+            If This.HFONT
+                DllCall("DeleteObject", "Ptr", This.HFONT)
+            This.HFONT := 0
+            Return
+        }
+        
+        HDC := DllCall("GetDC", "Ptr", 0, "UPtr") ; HDC = Handle to Device Context (for display/graphics operations)
+        LOGPIXELSY := DllCall("GetDeviceCaps", "Ptr", HDC, "Int", 90, "Int")
+        DllCall("ReleaseDC", "Ptr", 0, "Ptr", HDC)
+        
+        DllCall("GetObject", "Ptr", HDEF, "Int", 92, "Ptr", LOGFONTW) ; HDC = Handle to Device Context (for display/graphics operations).  LOGFONTW = Logical Font Windows (W stands for Wide/Unicode version.This is a Windows structure that defines the attributes of a font)
+        
+        If (Size != "")
+            NumPut("Int", -Round(Size * LOGPIXELSY / 72), LOGFONTW)
+        
+        ; Set font weight (Regular = 400, Bold = 700)
+        NumPut("Int", Bold ? 700 : 400, LOGFONTW, 16)
+        
+        If (FontName != "")
+            StrPut(FontName, LOGFONTW.Ptr + 28, 32)
+        
+        If HFONT := DllCall("CreateFontIndirectW", "Ptr", LOGFONTW, "UPtr") {
+            If This.HFONT
+                DllCall("DeleteObject", "Ptr", This.HFONT)
+            This.HFONT := HFONT
+        }
+    }
+    
+    Static SetMaxWidth(Width := 0) {
+        This.MaxWidth := Width
+    }
+    
+    Static _WNDPROC_(hWnd, uMsg, wParam, lParam) {
+        Switch uMsg {
+            Case 0x0411:  ; TTM_TRACKACTIVATE
+                If This.ToolTips.Has(hWnd) && (This.ToolTips[hWnd] = 0) {
+                    If (This.BkgColor != "")
+                        SendMessage(0x413, This.BkgColor, 0, hWnd)  ; TTM_SETTIPBKCOLOR *TTM = ToolTip Message
+                    If (This.TxtColor != "")
+                        SendMessage(0x414, This.TxtColor, 0, hWnd)  ; TTM_SETTIPTEXTCOLOR
+                    If This.HFONT
+                        SendMessage(0x30, This.HFONT, 0, hWnd)     ; WM_SETFONT *WM = Window Message
+                    If This.MaxWidth
+                        SendMessage(0x418, 0, This.MaxWidth, hWnd)  ; TTM_SETMAXTIPWIDTH
+                    This.ToolTips[hWnd] := 1
+                }
+            Case 0x0001:  ; WM_CREATE
+                DllCall("UxTheme.dll\SetWindowTheme", "Ptr", hWnd, "Ptr", 0, "Ptr", StrPtr(""))
+                This.ToolTips[hWnd] := 0
+            Case 0x0002:  ; WM_DESTROY
+                This.ToolTips.Delete(hWnd)
+        }
+        Return DllCall(This.OWP, "Ptr", hWnd, "UInt", uMsg, "Ptr", wParam, "Ptr", lParam, "UInt")
+    }
+    
+    Static _EXIT_(*) {
+        If (ToolTipOpts.OWP != 0) {
+            For HWND In ToolTipOpts.ToolTips.Clone()
+                DllCall("DestroyWindow", "Ptr", HWND)
+            ToolTipOpts.ToolTips.Clear()
+            If ToolTipOpts.HFONT
+                DllCall("DeleteObject", "Ptr", ToolTipOpts.HFONT)
+            If (A_PtrSize = 8)
+                DllCall("User32.dll\SetClassLongPtrW", "Ptr", ToolTipOpts.HTT, "Int", -24, "Ptr", ToolTipOpts.OWP, "UPtr")
+            Else
+                DllCall("User32.dll\SetClassLongW", "Ptr", ToolTipOpts.HTT, "Int", -24, "Int", ToolTipOpts.OWP, "UInt")
+            ToolTipOpts.OWP := 0
+        }
     }
 }
 

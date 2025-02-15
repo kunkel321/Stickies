@@ -55,8 +55,8 @@ include additional human-written code for enhanced features and bug fixes.. The 
 This script is unique because nearly every bit of code was created with AI prompts, then pasted into the ahk editor.  A great deal of human input was needed, but very little of the actual code was human-generated.  Edit: In later versions, more human code was added.
 ![Screenshot of Sticky Notes tool](https://i.imgur.com/GKEZ5er.png)
 Screenshot explanation:
-1.	1.	Sticky Note. Top/Center is "dragbar." Drag the dragbar to move the note. Double-click the dragbar to open the editor. Right-click the note for the context menu.  The notes have optional borders to visually differentiate them.  
-2.	 Alt+Click interactive checkbox items to toggle.
+1.	Sticky Note. Top/Center is "dragbar." Drag the dragbar to move the note. Double-click the dragbar to open the editor. Right-click the note for the context menu.  The notes have optional borders to visually differentiate them.  
+2.	Alt+Click interactive checkbox items to toggle.
 3.	Note Editor. Most of the formatting options are found here. Make checkbox items as seen in image.
 4.	Alarm Settings gui.  After an alarm plays, it deletes itself unless it recurs on specified weekdays.   Choose from a folder of .wav files.  There is a ‘test’ button and a ‘stop’ button.  
 5.	Sticky Note context menu.  When a note is alarmed, additional items (‘Stop’, ‘Delete Alarm’) are added to the menu.

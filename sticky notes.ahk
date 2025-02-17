@@ -2,29 +2,44 @@
 #SingleInstance Force
 
 ^Esc::ExitApp
-
 /*
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    2-14-2025
+Version:    2-17-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
-Features, Functionality, and Usage:
------------------------------------
+Features, Functionality, Usage, and Tips:
+-----------------------------------------
 - Create sticky notes that persist between script restarts
 - Notes cascade from top-left of screen for better visibility
 - Cascading Positions: New note doesn't fully cover previous note
 - Notes cycle through different pastel background colors automatically
 - Several formatting options including fonts, colors, sizing, and borders
+- Visual customization: Border thickness changes with bold text
+- Stick notes to windows: Notes can be attached to specific application windows
+- Window persistence: Notes "stuck to" specific windows reappear when window reopens
+- Notes can be unstuck by clicking the window button again
 - Set alarms for individual notes with optional weekly recurrence
+- Many editor dialog options support accelerator keys (Alt+A for alarm, etc.)
+- Visual alert: Notes can shake when alarms trigger (configurable)
+- Multiple alarm repeats: Choose between once, 3x, or 10x alarm repetitions
+- Alarm sounds: Custom alarm sounds can be added to the Sounds folder
+- Smart alarm management: System detects and reports missed alarms on startup
 - Main window with note management, preview, and search functionality
+- Color-coded notes: Notes maintain their color scheme in preview list
+- Rich preview: Hover over notes in manager for formatted preview with original fonts/colors
+- Search functionality: Filter notes by content in main window
+- Selective display: Filter note list to show only hidden or visible notes
 - Access main window with Win+Shift+S (hidden by default)
+- Notes' show alarm times and window attachments in note manager listview
+- Bulk operations: Select multiple notes to hide/unhide/delete simultaneously
 - Notes are created using Win+Shift+N or from clipboard with Win+Shift+C
 - Hotkeys can be changed near top of code
 - Tips button in note manager shows hotkeys and other tips
 - Drag notes by their top bar to reposition
+- Configurable drag area: Option to maximize note space by minimizing drag area
 - Notes auto-save position when moved
 - Double-click top bar or right-click for editing options
 - System tray icon provides quick access to common functions
@@ -33,19 +48,20 @@ Features, Functionality, and Usage:
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
 - Alarm System: Set one-time or recurring alarms with custom sounds
 - All note data saved to sticky_notes.ini in script directory
-- Hidden notes can be restored through main window
-
-Tips:
------
 - Use manual "Save Status" after significant changes
 - "Load/Reload Notes" refreshes all notes from storage
+- Hidden notes can be restored through main window
 - Check error_log.txt for troubleshooting (if enabled)
-- Use main window's search to find specific notes or filter by hidden/unhidden
 - Right-click menu provides quick access to several functions
-- Preview notes in note manager listview via right-click
+- Multiple selection: Use Ctrl+Click to select multiple notes in manager
+
+Known Issues:
+-------------
+- In note listview, when previewing, must let preview time-out before previewing another
+- In note listview, if notes are sorted, colors will not sort with them
 
 Development Note:
-----------------
+-----------------
 This script was developed primarily through AI-assisted coding, with Claude AI 
 generating most of the base code structure and functionality. Later versions 
 include additional human-written code for enhanced features and bug fixes.
@@ -70,18 +86,28 @@ Else { ; If color app not found, uses these hex codes.
 
 ; Hotkey Configuration.  Change hotkeys if desired.
 class OptionsConfig {
-    static ERROR_LOG            := 0          ; 1 = yes, 0 = no
-    static TOGGLE_MAIN_WINDOW   := "+#s"      ; Shift+Win+S
-    static NEW_NOTE             := "+#n"      ; Shift+Win+N
-    static NEW_CLIPBOARD_NOTE   := "+#c"      ; Shift+Win+C
-    static APP_ICON             := "sticky.ico"
-    static INI_FILE             := "sticky_notes.ini"
-    static AUTO_OPEN_EDITOR     := 1          ; 1 = yes, 0 = no
-    static MAX_NOTE_WORDS       := 200        ; Maximum words in a note
-    static MAX_NOTE_LINES       := 35         ; Maximum lines in a note
+    static ERROR_LOG             := 0          ; 1 = yes, 0 = no
+    static TOGGLE_MAIN_WINDOW    := "+#s"      ; Shift+Win+S
+    static NEW_NOTE              := "+#n"      ; Shift+Win+N
+    static NEW_CLIPBOARD_NOTE    := "+#c"      ; Shift+Win+C
+    static APP_ICON              := "sticky.ico"
+    static INI_FILE              := "sticky_notes.ini"
+    static AUTO_OPEN_EDITOR      := 1          ; 1 = yes, 0 = no
+    static MAX_NOTE_WORDS        := 200        ; Maximum words in a note
+    static MAX_NOTE_LINES        := 35         ; Maximum lines in a note
     ; To prevent accidental checkbox clicks.  Blank "" means don't require modifer.
     static CHECKBOX_MODIFIER_KEY := "Alt" 
-    static DEFAULT_BORDER      := false      ; Whether new notes have borders by default
+    static DEFAULT_BORDER        := true       ; Whether new notes have borders by default
+    ; Visual shake for alarms settings.
+    static DEFAULT_ALARM_SHAKE   := true       ; Whether new notes have borders by default
+    static SHAKE_STEPS           := 40         ; Total number of shake movements
+    static MIN_SHAKE_DISTANCE    := 0          ; Minimum shake distance in pixels
+    static MAX_SHAKE_DISTANCE    := 12         ; Maximum shake distance in pixels
+    ; Sticky note drag area settings.
+    static RESERVE_DRAG_AREA     := 0          ; Whether to reserve space at top for drag area
+    static DRAG_AREA_OFFSET      := 25         ; Y-offset of note text when reserving drag area
+    static NO_RESERVE_OFFSET     := 5          ; Y-offset when not reserving drag area
+    static NO_RESERVE_X_OFFSET   := 25         ; X-offset for drag area when not reserving space (makes room to click checkboxes)
 }
 
 ; Global Constants
@@ -150,6 +176,8 @@ class StickyNotes {
     notes := Map()
     noteManager := ""
     mainWindow := ""
+    windowCheckTimer := 0
+    hasStuckNotes := false
 
     static cycleComplete := Map() 
     
@@ -310,6 +338,7 @@ class StickyNotes {
     
     LoadNotesOnStartup() {
         this.noteManager.LoadSavedNotes()
+        this.UpdateWindowFollowing()  ; Add this line
     }
 
     ResetNoteAlarmCycle(noteId) {
@@ -531,6 +560,73 @@ class StickyNotes {
         }
     }
 
+    UpdateWindowFollowing() {
+        ; Check if we have any stuck notes
+        hasStuckNotes := false
+        for id, note in this.noteManager.notes {
+            if (note.isStuckToWindow) {
+                hasStuckNotes := true
+                break
+            }
+        }
+        
+        ; Start or stop timer based on whether we have stuck notes
+        if (hasStuckNotes && !this.windowCheckTimer) {
+            LogError("Starting window check timer`n")
+            this.windowCheckTimer := SetTimer(this.CheckStuckWindows.Bind(this), 500)  ; Changed from 100 to 500ms
+        }
+        else if (!hasStuckNotes && this.windowCheckTimer) {
+            LogError("Stopping window check timer`n")
+            SetTimer(this.windowCheckTimer, 0)
+            this.windowCheckTimer := 0
+        }
+    }
+        ; Add this method to the StickyNotes class:
+    CheckStuckWindows() {
+        static lastStates := Map()  ; Track last known state for each note
+        
+        for id, note in this.noteManager.notes {
+            if (!note.isStuckToWindow)
+                continue
+                    
+            LogError("Checking stuck note " id " for window " note.stuckWindowTitle "`n")
+            
+            ; Simple window existence check
+            targetWindow := WinExist("ahk_class " note.stuckWindowClass)
+            windowExists := (targetWindow && InStr(WinGetTitle("ahk_id " targetWindow), note.stuckWindowTitle))
+            
+            ; Get current note visibility state, checking borderGui if it exists
+            try {
+                isCurrentlyVisible := false
+                if (note.borderGui && note.borderGui.Gui1) {
+                    isCurrentlyVisible := WinExist("ahk_id " note.borderGui.Gui1.Hwnd) ? true : false
+                } else if (note.gui) {
+                    isCurrentlyVisible := WinExist("ahk_id " note.gui.Hwnd) ? true : false
+                }
+                LogError("Note " id " visibility check - isCurrentlyVisible: " isCurrentlyVisible "`n")
+            } catch Error as err {
+                LogError("Error checking note " id " visibility: " err.Message "`n")
+                isCurrentlyVisible := false
+            }
+            
+            ; Only act if state has changed
+            if (!lastStates.Has(id) || lastStates[id] != windowExists) {
+                storage := NoteStorage()
+                isHidden := storage.IsStuckNoteHidden(id)
+                
+                if (windowExists && !isHidden && !isCurrentlyVisible) {
+                    LogError("Showing stuck note " id " with border: " (note.borderGui ? "yes" : "no") "`n")
+                    note.Show()
+                } else if (!windowExists && isCurrentlyVisible) {
+                    LogError("Hiding stuck note " id " with border: " (note.borderGui ? "yes" : "no") "`n")
+                    note.Hide()
+                }
+                
+                lastStates[id] := windowExists
+            }
+        }
+    }
+
     SetupSystemTray() {
         ; Basic tray menu setup - will be expanded in SystemTrayManager component
         appName := StrReplace(A_ScriptName, ".ahk") 
@@ -711,14 +807,19 @@ class Note {
     currentX := ""
     currentY := ""
 
-    ;  alarm-related properties
+    ; alarm-related properties
     hasAlarm := false
     alarmTime := ""
     alarmSound := ""
     alarmDays := ""
     alarmRepeatCount := 1
+    visualShake := true  
     lastPlayDate := ""
 
+    ; window-stick properties
+    isStuckToWindow := false
+    stuckWindowTitle := ""
+    stuckWindowClass := ""
 
     __New(idNum, options) {
         ; Store note ID and properties
@@ -739,7 +840,16 @@ class Note {
         this.alarmDays := options.HasOwnProp("alarmDays") ? options.alarmDays : ""
         this.alarmRepeatCount := options.HasOwnProp("alarmRepeatCount") ? options.alarmRepeatCount : 1
         this.lastPlayDate := options.HasOwnProp("lastPlayDate") ? options.lastPlayDate : ""
+
+        ; Initialize window-sticking properties
+        this.isStuckToWindow := options.HasOwnProp("isStuckToWindow") ? !!options.isStuckToWindow : false
+        this.stuckWindowTitle := options.HasOwnProp("stuckWindowTitle") ? options.stuckWindowTitle : ""
+        this.stuckWindowClass := options.HasOwnProp("stuckWindowClass") ? options.stuckWindowClass : ""
         
+        LogError("Initializing note " idNum " with window properties:`n")
+        LogError("  isStuckToWindow: " this.isStuckToWindow "`n")
+        LogError("  stuckWindowTitle: " this.stuckWindowTitle "`n")
+        LogError("  stuckWindowClass: " this.stuckWindowClass "`n")
         ; Create the basic GUI
         if (this.isOnTop) {
             this.gui := Gui("-Caption +AlwaysOnTop +Owner")
@@ -750,8 +860,10 @@ class Note {
         this.gui.BackColor := this.bgcolor
         
         ; Create drag area
+        xPos := OptionsConfig.RESERVE_DRAG_AREA ? 0 : OptionsConfig.NO_RESERVE_X_OFFSET
         this.dragArea := this.gui.Add("Text", 
-            "x0 y0 w" this.width " h20 Background" this.bgcolor)
+            "x" xPos " y0 w" (this.width - xPos) " h20 Background" this.bgcolor)
+
             
         ; Set default font
         this.gui.SetFont("s" this.fontSize (this.isBold ? " bold" : ""), this.font)
@@ -795,8 +907,9 @@ class Note {
 
     CreateSimpleNote() {
         ; Add single text control for simple notes
+        yPos := OptionsConfig.RESERVE_DRAG_AREA ? OptionsConfig.DRAG_AREA_OFFSET : OptionsConfig.NO_RESERVE_OFFSET
         txt := this.gui.Add("Text", 
-            "y25 x5 w" this.width,
+            "y" yPos " x5 w" this.width,
             this.content)
         txt.SetFont("c" this.fontColor (this.isBold ? " bold" : ""))
         
@@ -811,7 +924,7 @@ class Note {
     CreateComplexNote() {
         ; Initialize control array
         this.controls := []
-        currentY := 25  ; Start below drag area
+        currentY := OptionsConfig.RESERVE_DRAG_AREA ? OptionsConfig.DRAG_AREA_OFFSET : OptionsConfig.NO_RESERVE_OFFSET
         
         ; Parse content for checkboxes
         parsed := this.ParseCheckboxContent()
@@ -1092,6 +1205,10 @@ class Note {
         ; Show the note if it's hidden
         this.Show()
         
+        ; Trigger shake effect if enabled
+        if (this.visualShake)
+            this.ShakeNote()
+        
         ; Play the alarm sound if specified
         if (this.alarmSound && FileExist(this.alarmSound))
             SoundPlay(this.alarmSound, 1)
@@ -1130,6 +1247,67 @@ class Note {
             } catch Error as err {
                 LogError("Error in Note.DeleteAlarm: " err.Message "`n")
             }
+        }
+    }
+
+    ShakeNote() {
+        this.isShaking := false  ; Class property to track shake state
+        
+        ; Create a bound function for the timer to use
+        boundShake := this.PerformShake.Bind(this)
+        SetTimer(boundShake, 10)  ; Start immediately
+    }
+
+    ; handle the actual shake animation:
+    PerformShake() {
+        static shakeStep := 0
+        static originalX := 0
+        static originalY := 0
+        
+        try {
+            targetGui := this.borderGui ? this.borderGui.Gui1 : this.gui
+            
+            ; Initialize on first step
+            if (!this.isShaking) {
+                this.isShaking := true
+                targetGui.GetPos(&originalX, &originalY)
+                shakeStep := 0
+                LogError("Starting shake animation for note " this.id "`n")
+            }
+            
+            ; Calculate diminishing shake distance
+            progress := shakeStep / OptionsConfig.SHAKE_STEPS
+            range := OptionsConfig.MAX_SHAKE_DISTANCE - OptionsConfig.MIN_SHAKE_DISTANCE
+            shakeDistance := Max(
+                OptionsConfig.MIN_SHAKE_DISTANCE,
+                OptionsConfig.MAX_SHAKE_DISTANCE - (range * progress)
+            )
+            
+            ; Calculate new position based on step
+            Switch Mod(shakeStep, 4) {
+                Case 0: WinMove(originalX + shakeDistance, originalY,,, targetGui)
+                Case 1: WinMove(originalX - shakeDistance, originalY,,, targetGui)
+                Case 2: WinMove(originalX, originalY - shakeDistance,,, targetGui)
+                Case 3: WinMove(originalX, originalY + shakeDistance,,, targetGui)
+            }
+            
+            shakeStep++
+            
+            ; Stop after configured number of steps
+            if (shakeStep >= OptionsConfig.SHAKE_STEPS) {
+                ; Return to original position
+                WinMove(originalX, originalY,,, targetGui)
+                this.isShaking := false
+                shakeStep := 0
+                SetTimer(, 0)  ; Stop timer
+                LogError("Completed shake animation for note " this.id "`n")
+                return
+            }
+            
+        } catch as err {
+            LogError("Error in PerformShake: " err.Message "`n")
+            SetTimer(, 0)  ; Stop timer on error
+            return
         }
     }
 
@@ -1179,8 +1357,10 @@ class Note {
         this.gui.BackColor := this.bgcolor
         
         ; Create drag area
+        xPos := OptionsConfig.RESERVE_DRAG_AREA ? 0 : OptionsConfig.NO_RESERVE_X_OFFSET
         this.dragArea := this.gui.Add("Text", 
-            "x0 y0 w" this.width " h20 Background" this.bgcolor)
+            "x" xPos " y0 w" (this.width - xPos) " h20 Background" this.bgcolor)
+
             
         ; Set default font
         this.gui.SetFont("s" this.fontSize (this.isBold ? " bold" : ""), this.font)
@@ -1230,20 +1410,25 @@ class Note {
             ; If no border, just hide the note
             this.gui.Hide()
         }
-        storage := NoteStorage()
-        storage.MarkNoteHidden(this.id)
+        ; Only mark as hidden in storage if this is a user-initiated hide,
+        ; not an automatic hide due to window closing
+        if (!this.isStuckToWindow) {
+            storage := NoteStorage()
+            storage.MarkNoteHidden(this.id)
+        }
     }
-    
+
     Show(*) {
         if (this.borderGui && this.borderGui.Gui1) {
-            ; If note has a border, show the border GUI (child will show automatically)
-            this.borderGui.Gui1.Show()
+            ; For bordered notes, need to show both explicitly
+            this.gui.Show()  ; Show child first
+            this.borderGui.Gui1.Show()  ; Then show parent
         } else {
             ; If no border, just show the note
             this.gui.Show()
         }
     }
-    
+        
     Delete(*) {
         if (MsgBox("Are you sure you want to delete this note?",, "YesNo") = "Yes") {
             try {
@@ -1538,11 +1723,19 @@ class NoteManager {
                         continue
                     }
                     
-                    ; Only create visible GUI if note is not hidden
-                    if (!noteData.isHidden) {
-                        LogError("Creating GUI for note " noteData.id "`n")
+                    ; Create GUI if note is visible OR has an alarm
+                    if (!noteData.isHidden || (noteData.hasAlarm && noteData.alarmTime)) {
+                        LogError("Creating GUI for note " noteData.id " (Visible: " (!noteData.isHidden ? "Yes" : "No") ", Alarmed: " (noteData.hasAlarm ? "Yes" : "No") ")`n")
                         newNote := Note(noteData.id, noteData)
                         this.notes[noteData.id] := newNote
+                        
+                        ; If note should be hidden but has an alarm, hide it after creation
+                        if (noteData.isHidden) {
+                            LogError("Hiding alarmed note " noteData.id "`n")
+                            newNote.gui.Hide()
+                            if (newNote.borderGui && newNote.borderGui.Gui1)
+                                newNote.borderGui.Gui1.Hide()
+                        }
                     }
                 } catch as err {
                     LogError("Error creating note " noteData.id ": " err.Message "`n")
@@ -1728,8 +1921,16 @@ class NoteStorage {
                 IniWrite(note.alarmSound, OptionsConfig.INI_FILE, sectionName, "AlarmSound")
                 IniWrite(note.alarmDays, OptionsConfig.INI_FILE, sectionName, "AlarmDays")
                 IniWrite(note.alarmRepeatCount, OptionsConfig.INI_FILE, sectionName, "AlarmRepeatCount")
+                IniWrite(note.visualShake, OptionsConfig.INI_FILE, sectionName, "VisualShake")
                 IniWrite(note.lastPlayDate, OptionsConfig.INI_FILE, sectionName, "LastPlayDate")
             } 
+
+            ; Save window sticking info
+            IniWrite(note.isStuckToWindow ? 1 : 0, OptionsConfig.INI_FILE, sectionName, "IsStuckToWindow")
+            if (note.isStuckToWindow) {
+                IniWrite(note.stuckWindowTitle, OptionsConfig.INI_FILE, sectionName, "StuckWindowTitle")
+                IniWrite(note.stuckWindowClass, OptionsConfig.INI_FILE, sectionName, "StuckWindowClass")
+            }
                 
             return true
         } catch as err {  ; <- This was also missing its closing brace
@@ -1773,9 +1974,18 @@ class NoteStorage {
                 alarmSound: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmSound", ""),
                 alarmDays: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmDays", ""),
                 alarmRepeatCount: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmRepeatCount", "1")),
+                visualShake: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "VisualShake", "1")),
                 lastPlayDate: IniRead(OptionsConfig.INI_FILE, sectionName, "LastPlayDate", ""),
+                isStuckToWindow: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "IsStuckToWindow", "0")) = 1,
+                stuckWindowTitle: IniRead(OptionsConfig.INI_FILE, sectionName, "StuckWindowTitle", ""),
+                stuckWindowClass: IniRead(OptionsConfig.INI_FILE, sectionName, "StuckWindowClass", "")
             }
             
+            LogError("Loading note " id " with window properties:`n")
+            LogError("  isStuckToWindow: " noteData.isStuckToWindow "`n")
+            LogError("  stuckWindowTitle: " noteData.stuckWindowTitle "`n")
+            LogError("  stuckWindowClass: " noteData.stuckWindowClass "`n")
+
             return noteData
         } catch as err {
             return false
@@ -1880,6 +2090,14 @@ class NoteStorage {
         }
     }
     
+    IsStuckNoteHidden(id) {
+        try {
+            sectionName := this.GetNoteSectionName(id)
+            return Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "Hidden", "0")) = 1
+        } catch {
+            return false
+        }
+    }
 
     MarkNoteHidden(id) {
         try {
@@ -2031,7 +2249,7 @@ class NoteEditor {
         boldCB.OnEvent("Click", (*) => this.UpdateBold(boldCB.Value))
         
         ; Font color dropdown
-        this.gui.Add("Text", "x15 y+10", "Font:")
+        this.gui.Add("Text", "x15 y+14", "Font:")
         fontColorDropdown := this.gui.Add("DropDownList", "x+5 yp-3 w80", this.GetFontColorList())
         fontColorDropdown.Text := this.GetFontColorName(this.note.fontColor)
         fontColorDropdown.OnEvent("Change", (*) => this.UpdateFontColor(fontColorDropdown.Text))
@@ -2108,7 +2326,7 @@ class NoteEditor {
         editorWidth := Max(this.note.width, 200)  ; Use note width but minimum of 200
         ; Add Note Options group
         this.gui.Add("GroupBox", 
-            "x5 y+15 w" (editorWidth - 10) " h95",  ; Made taller for both controls
+            "x5 y+15 w" (editorWidth - 10) " h123",  ; Made taller for both controls
             "Note Options")
 
         ; Add alarm button
@@ -2117,21 +2335,38 @@ class NoteEditor {
         this.addAlarmBtn := this.gui.Add("Button", "xp+6 yp+16 w" (editorWidth - 25), addAlarmBtnText)
         this.addAlarmBtn.OnEvent("Click", this.ShowAlarmDialog.Bind(this))
         
+        LogError("Setting stick button text for note " this.note.id "`n")
+        LogError("  isStuckToWindow: " this.note.isStuckToWindow "`n")
+        LogError("  stuckWindowTitle: " this.note.stuckWindowTitle "`n")
+
+        ; stick to window button
+        stickBtnText := "Stick to &Window..."
+        if (this.note.isStuckToWindow && this.note.stuckWindowTitle) {
+            ; Truncate title if too long
+            stickBtnText := StrLen(this.note.stuckWindowTitle) > 30 
+                ? SubStr(this.note.stuckWindowTitle, 1, 27) "..."
+                : this.note.stuckWindowTitle
+            LogError("Setting stick button text to: " stickBtnText "`n")
+        }
+
+        this.stickToWindowBtn := this.gui.Add("Button", "xp y+5 w" (editorWidth - 25), stickBtnText)
+        this.stickToWindowBtn.OnEvent("Click", this.ShowWindowStickyDialog.Bind(this))
+
         ; Add Width control with UpDown
-        this.gui.Add("Text", "xp+4 yp+30", "Width:")
+        this.gui.Add("Text", "xp+4 yp+33", "Width:")
         this.widthEdit := this.gui.Add("Edit", "x+5 yp-3 w50 Number", this.note.width)
         widthUpDown := this.gui.Add("UpDown", "Range50-500", this.note.width)
         this.widthEdit.OnEvent("Change", (*) => this.UpdateWidth(this.widthEdit.Value))
         
         
         ; Add Always on Top checkbox below
-        alwaysOnTopCB := this.gui.Add("Checkbox", "xp-35 yp+30", "Always on Top")
+        alwaysOnTopCB := this.gui.Add("Checkbox", "xp-35 yp+27", "Always on &Top")
         alwaysOnTopCB.Value := this.note.isOnTop
         alwaysOnTopCB.OnEvent("Click", (*) => this.ToggleAlwaysOnTop(alwaysOnTopCB.Value))
 
         
         ; Border option
-        borderCB := this.gui.Add("Checkbox", "x+10", "Border")
+        borderCB := this.gui.Add("Checkbox", "x+10", "&Border")
         borderCB.Value := this.note.hasBorder
         borderCB.OnEvent("Click", (*) => this.UpdateBorder(borderCB.Value))
 
@@ -2153,6 +2388,96 @@ class NoteEditor {
         }
         this.alarmDialog.Show()
     }
+
+    ShowWindowStickyDialog(*) {
+        if (this.note.isStuckToWindow) {
+            ; If already stuck, unstick it
+            this.note.isStuckToWindow := false
+            this.note.stuckWindowTitle := ""
+            this.note.stuckWindowClass := ""
+            
+            ; Update button text
+            this.stickToWindowBtn.Text := "Stick to &Window..."
+            
+            ; Save changes
+            storage := NoteStorage()
+            storage.SaveNote(this.note)
+            
+            ; Update window following
+            app.UpdateWindowFollowing()
+            return
+        }
+
+        ; Create window picker dialog
+        windowList := []
+        stickyGui := Gui("+Owner" this.gui.Hwnd " +AlwaysOnTop", "Select Window")
+        stickyGui.BackColor := formColor  ; Set background color
+        stickyGui.SetFont("c" fontColor)  ; Set font color
+        
+        ; Add ListView for windows - with list color
+        lv := stickyGui.Add("ListView", "w400 h200 Background" listColor, ["Window Title", "Class"])
+        lv.ModifyCol(1, 270)
+        lv.ModifyCol(2, 130)
+        
+        ; Populate ListView with visible windows
+        ids := WinGetList(,, "Program Manager")
+        for hwnd in ids {
+            title := WinGetTitle(hwnd)
+            class := WinGetClass(hwnd)
+            
+            ; Skip if no title or if it's our own GUI
+            if (title = "" || hwnd = this.gui.Hwnd || hwnd = stickyGui.Hwnd)
+                continue
+                
+            ; Skip certain system windows
+            if (class ~= "i)^(Shell_TrayWnd|Windows.UI.Core.CoreWindow)$")
+                continue
+                
+            lv.Add(, title, class)
+            windowList.Push({title: title, class: class})
+        }
+
+        ; Handle selection (for both OK button and double-click)
+        SaveSelection(*) {
+            if (selected := lv.GetNext()) {
+                ; Store current edit content before changes
+                currentContent := this.editControl.Text
+                
+                ; Store previous AlwaysOnTop state before changing it
+                this.note.previousAlwaysOnTop := this.note.isOnTop
+                
+                ; Set up window sticking
+                this.note.isStuckToWindow := true
+                this.note.stuckWindowTitle := windowList[selected].title
+                this.note.stuckWindowClass := windowList[selected].class
+                
+                ; Force AlwaysOnTop
+                this.note.isOnTop := true
+                
+                ; Update editor GUI
+                this.gui.Destroy()
+                this.CreateGui()
+                
+                ; Restore the edit content
+                this.editControl.Text := currentContent
+                
+                this.Show()
+                app.UpdateWindowFollowing()
+                
+                stickyGui.Destroy()
+            }
+        }
+
+        ; Add double-click handler
+        lv.OnEvent("DoubleClick", SaveSelection)
+
+        ; Add buttons
+        stickyGui.Add("Button", "Default x10 y+10 w80", "OK").OnEvent("Click", SaveSelection)
+        stickyGui.Add("Button", "x+10 w80", "Cancel").OnEvent("Click", (*) => stickyGui.Destroy())
+        
+        stickyGui.Show()
+    }
+
     ; And update the ToggleAlwaysOnTop method to actually set the property
     ToggleAlwaysOnTop(value) {
         this.note.isOnTop := value ? true : false
@@ -2294,9 +2619,12 @@ class AlarmDialog {
         this.repeatOnce := this.gui.AddRadio("Group xm", "Once")
         this.repeatGroup2 := this.gui.AddRadio("x+4", "3 times")
         this.repeatGroup3 := this.gui.AddRadio("x+4", "10 times")
-        ; Set default to Once
+        ; Shake box
+        this.visualShake := this.gui.AddCheckbox("x+60 yp", "Visual Shake")
+        ; Set defaults
+        this.visualShake.Value := OptionsConfig.DEFAULT_ALARM_SHAKE 
         this.repeatOnce.Value := 1
-        
+
         ; Weekday checkboxes
         this.gui.AddText("xm y+15", "Reoccur:")
         days := ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
@@ -2305,19 +2633,19 @@ class AlarmDialog {
         }
         
         ; Save button
-        saveBtn := this.gui.AddButton("xm y+15 w75", "Save")
+        saveBtn := this.gui.AddButton("xm y+15 w75", "&Save")
         saveBtn.OnEvent("Click", this.SaveAlarm.Bind(this))
 
         ; Stop button
-        stopBtn := this.gui.AddButton("x+5 yp w75", "Stop")
+        stopBtn := this.gui.AddButton("x+5 yp w75", "&Stop")
         try stopBtn.OnEvent("Click", this.StopSound.Bind(this))
 
         ; Delete button
-        deleteBtn := this.gui.AddButton("x+5 yp w75", "Delete")
+        deleteBtn := this.gui.AddButton("x+5 yp w75", "&Delete")
         deleteBtn.OnEvent("Click", this.DeleteAlarm.Bind(this))
 
         ; Cancel button
-        cancelBtn := this.gui.AddButton("x+5 yp w75", "Cancel")
+        cancelBtn := this.gui.AddButton("x+5 yp w75", "&Cancel")
         cancelBtn.OnEvent("Click", (*) => this.Destroy())
         
         ; Either load existing alarm or set default time
@@ -2445,6 +2773,8 @@ class AlarmDialog {
             this.note.alarmRepeatCount := 10
         else  ; Default to once if somehow none are selected
             this.note.alarmRepeatCount := 1
+
+        this.note.visualShake := this.visualShake.Value
             
         ; Save to storage immediately
         storage := NoteStorage()
@@ -2649,7 +2979,7 @@ class MainWindow {
         this.gui.Add("Button", "x10 y+5 w" totalWidth " h30", "Hide This Window")
             .OnEvent("Click", (*) => this.Hide())
             
-         ; Add separator before ListView
+        ; Add separator before ListView
         this.gui.Add("Text", "x10 y+10 w" totalWidth " h2 0x10")  ; Horizontal line
 
         ; Add filter controls
@@ -2666,7 +2996,7 @@ class MainWindow {
         ; Create ListView with columns
         this.noteList := this.gui.Add("ListView", 
             "x10 y+5 w" totalWidth " h200 Background" listColor, 
-            ["Created", "Note Contents", "Alarm"])
+            ["Created", "Note Contents", "Alarm|Window"])
 
         ; Set column widths
         this.noteList.ModifyCol(1, 70)
@@ -2748,11 +3078,26 @@ class MainWindow {
                 ? SubStr(noteData.content, 1, 47) "..."
                 : noteData.content
                 
-            alarmInfo := noteData.hasAlarm 
-                ? noteData.alarmTime (noteData.alarmDays ? " (" AlarmConfig.SortDays(noteData.alarmDays) ")" : "")
-                : ""
+            ; Build combined alarm/window info
+            combinedInfo := ""
+
+            ; Add alarm info if present
+            if (noteData.hasAlarm) {
+                combinedInfo := noteData.alarmTime (noteData.alarmDays ? " (" AlarmConfig.SortDays(noteData.alarmDays) ")" : "")
+            }
+
+            ; Add window info if present
+            if (noteData.isStuckToWindow && noteData.stuckWindowTitle) {
+                windowInfo := StrLen(noteData.stuckWindowTitle) > 30 
+                    ? SubStr(noteData.stuckWindowTitle, 1, 27) "..."
+                    : noteData.stuckWindowTitle
+                    
+                combinedInfo := combinedInfo 
+                    ? combinedInfo "|" windowInfo  ; Add window info with separator if there's already alarm info
+                    : windowInfo                   ; Just window info if no alarm
+            }
             
-            rowNum := this.noteList.Add(, creationDate, preview, alarmInfo, "")
+            rowNum := this.noteList.Add(, creationDate, preview, combinedInfo, "")
             this.noteRowMap[rowNum] := noteData.id
             
             this.CLV.Row(rowNum, 
@@ -2817,7 +3162,7 @@ class MainWindow {
             tooltipShowing := false
         }
     }
-
+            
     GetSelectedNoteIds() {
         selectedIds := []
         row := 0

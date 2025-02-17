@@ -13,20 +13,36 @@ Customizable Hotkeys:
 * Win+Shift+C - Create new note from clipboard text
 * Win+Shift+S - Toggle main window visibility
 
-Features, Functionality, and Usage:
------------------------------------
+Features, Functionality, Usage, and Tips:
+-----------------------------------------
 - Create sticky notes that persist between script restarts
 - Notes cascade from top-left of screen for better visibility
 - Cascading Positions: New note doesn't fully cover previous note
 - Notes cycle through different pastel background colors automatically
 - Several formatting options including fonts, colors, sizing, and borders
+- Visual customization: Border thickness changes with bold text
+- Stick notes to windows: Notes can be attached to specific application windows
+- Window persistence: Notes "stuck to" specific windows reappear when window reopens
+- Notes can be unstuck by clicking the window button again
 - Set alarms for individual notes with optional weekly recurrence
+- Many editor dialog options support accelerator keys (Alt+A for alarm, etc.)
+- Visual alert: Notes can shake when alarms trigger (configurable)
+- Multiple alarm repeats: Choose between once, 3x, or 10x alarm repetitions
+- Alarm sounds: Custom alarm sounds can be added to the Sounds folder
+- Smart alarm management: System detects and reports missed alarms on startup
 - Main window with note management, preview, and search functionality
+- Color-coded notes: Notes maintain their color scheme in preview list
+- Rich preview: Hover over notes in manager for formatted preview with original fonts/colors
+- Search functionality: Filter notes by content in main window
+- Selective display: Filter note list to show only hidden or visible notes
 - Access main window with Win+Shift+S (hidden by default)
+- Notes' show alarm times and window attachments in note manager listview
+- Bulk operations: Select multiple notes to hide/unhide/delete simultaneously
 - Notes are created using Win+Shift+N or from clipboard with Win+Shift+C
 - Hotkeys can be changed near top of code
 - Tips button in note manager shows hotkeys and other tips
 - Drag notes by their top bar to reposition
+- Configurable drag area: Option to maximize note space by minimizing drag area
 - Notes auto-save position when moved
 - Double-click top bar or right-click for editing options
 - System tray icon provides quick access to common functions
@@ -35,17 +51,17 @@ Features, Functionality, and Usage:
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
 - Alarm System: Set one-time or recurring alarms with custom sounds
 - All note data saved to sticky_notes.ini in script directory
-- Hidden notes can be restored through main window
-
-Tips:
------
 - Use manual "Save Status" after significant changes
 - "Load/Reload Notes" refreshes all notes from storage
+- Hidden notes can be restored through main window
 - Check error_log.txt for troubleshooting (if enabled)
-- Use main window's search to find specific notes or filter by hidden/unhidden
 - Right-click menu provides quick access to several functions
-- Preview notes in note manager listview via right-click
+- Multiple selection: Use Ctrl+Click to select multiple notes in manager
 
+Known Issues:
+-------------
+- In note listview, when previewing, must let preview time-out before previewing another
+- In note listview, if notes are sorted, colors will not sort with them
 
 Development Note:
 ----------------
@@ -66,4 +82,5 @@ Screenshot explanation:
 9.	List row colors match note back and font colors. 
 10.	The buttons on the bottom are for mostly ‘note-level’ commands.  You can Ctrl+Click to select multiple items.  Multi-selected items can be bulk hidden/unhidden or deleted. 
 11.	System tray icon right click menu has a few optons such as ‘Start with Windows’ and ‘Open Note ini File.’
-12.	The Tips dialog just shows a few tips.  It also lists the (customizable) hotkey combinations. 
+12.	The Tips dialog just shows a few tips.  It also lists the (customizable) hotkey combinations.
+2-17-2025: not in screenshot:  "Stick to window" button in note editor and corresponding dialog.  "Visual shake" checkbox in alarm dialog.

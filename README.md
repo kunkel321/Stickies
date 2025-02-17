@@ -83,4 +83,5 @@ Screenshot explanation:
 10.	The buttons on the bottom are for mostly ‘note-level’ commands.  You can Ctrl+Click to select multiple items.  Multi-selected items can be bulk hidden/unhidden or deleted. 
 11.	System tray icon right click menu has a few optons such as ‘Start with Windows’ and ‘Open Note ini File.’
 12.	The Tips dialog just shows a few tips.  It also lists the (customizable) hotkey combinations.
-2-17-2025: not in screenshot:  "Stick to window" button in note editor and corresponding dialog.  "Visual shake" checkbox in alarm dialog.
+
+- 2-17-2025: not in screenshot:  "Stick to window" button in note editor and corresponding dialog.  "Visual shake" checkbox in alarm dialog.

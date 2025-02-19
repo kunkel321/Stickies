@@ -6,7 +6,7 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    2-17-2025
+Version:    2-18-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -16,8 +16,10 @@ Features, Functionality, Usage, and Tips:
 - Notes cascade from top-left of screen for better visibility
 - Cascading Positions: New note doesn't fully cover previous note
 - Notes cycle through different pastel background colors automatically
+- Note font color can optionally cycle too, or just use black.
 - Several formatting options including fonts, colors, sizing, and borders
 - Visual customization: Border thickness changes with bold text
+- Border color always matches font color. 
 - Stick notes to windows: Notes can be attached to specific application windows
 - Window persistence: Notes "stuck to" specific windows reappear when window reopens
 - Notes can be unstuck by clicking the window button again
@@ -41,6 +43,7 @@ Features, Functionality, Usage, and Tips:
 - Drag notes by their top bar to reposition
 - Configurable drag area: Option to maximize note space by minimizing drag area
 - Notes auto-save position when moved
+- Turn off note deletion warning
 - Double-click top bar or right-click for editing options
 - System tray icon provides quick access to common functions
 - Start with Windows: Option available in tray menu
@@ -51,7 +54,7 @@ Features, Functionality, Usage, and Tips:
 - Use manual "Save Status" after significant changes
 - "Load/Reload Notes" refreshes all notes from storage
 - Hidden notes can be restored through main window
-- Check error_log.txt for troubleshooting (if enabled)
+- Check error_log.txt for troubleshooting (if enabled; warning: system hog)
 - Right-click menu provides quick access to several functions
 - Multiple selection: Use Ctrl+Click to select multiple notes in manager
 
@@ -65,49 +68,39 @@ Development Note:
 This script was developed primarily through AI-assisted coding, with Claude AI 
 generating most of the base code structure and functionality. Later versions 
 include additional human-written code for enhanced features and bug fixes.
-Thanks go to Hellbent (borderGui class) and Justme (ToolTipOptions, LV_Colors classes)
+Thanks go to the humans, Hellbent for his borderGui class, and 
+Justme for his ToolTipOptions and LV_Colors classes. 
 */
 
 ; #+N:: Create new note
 ; #+C:: Create new note from clipboard text
 ; #+S:: Toggle main window visibility
 
-; If ColorThemeIntegrator app is present, uses color settings.
-; Assumes that file is in grandparent folder of this file.
-settingsFile := A_ScriptDir "\..\colorThemeSettings.ini" 
-If FileExist(SettingsFile) {  ; Get colors from ini file. 
-    fontColor := IniRead(settingsFile, "ColorSettings", "fontColor")
-    listColor := IniRead(settingsFile, "ColorSettings", "listColor")
-    formColor := IniRead(settingsFile, "ColorSettings", "formColor")
-}
-Else { ; If color app not found, uses these hex codes.
-    fontColor := "0x1F1F1F", listColor := "0xFFFFFF", formColor := "0xE5E4E2"
-}
-
-; Hotkey Configuration.  Change hotkeys if desired.
+; Hotkeys and other Configuration.  Change if desired.
 class OptionsConfig {
-    static ERROR_LOG             := 0          ; 1 = yes, 0 = no
-    static TOGGLE_MAIN_WINDOW    := "+#s"      ; Shift+Win+S
-    static NEW_NOTE              := "+#n"      ; Shift+Win+N
-    static NEW_CLIPBOARD_NOTE    := "+#c"      ; Shift+Win+C
-    static APP_ICON              := "sticky.ico"
-    static INI_FILE              := "sticky_notes.ini"
-    static AUTO_OPEN_EDITOR      := 1          ; 1 = yes, 0 = no
-    static MAX_NOTE_WORDS        := 200        ; Maximum words in a note
-    static MAX_NOTE_LINES        := 35         ; Maximum lines in a note
-    ; To prevent accidental checkbox clicks.  Blank "" means don't require modifer.
-    static CHECKBOX_MODIFIER_KEY := "Alt" 
-    static DEFAULT_BORDER        := true       ; Whether new notes have borders by default
+    static ERROR_LOG             := false  ; Mostly for AI feedback.  Causes lag.  Recommend setting 'false.'      
+    static TOGGLE_MAIN_WINDOW    := "+#s"  ; Shift+Win+S. Shows/Hide Note Manager window.
+    static NEW_NOTE              := "+#n"  ; Shift+Win+N. New note.
+    static NEW_CLIPBOARD_NOTE    := "+#c"  ; Shift+Win+C. New note from text on clipboard.
+    static APP_ICON              := "sticky.ico" ; Homemade icon that kunkel321 made.
+    static INI_FILE              := "sticky_notes.ini" ; The note storage file. 
+    static AUTO_OPEN_EDITOR      := true   ; Should Note Editor auto open upon note creation?    
+    static MAX_NOTE_WORDS        := 200    ; Maximum words in a clipboard note before truncating.
+    static MAX_NOTE_LINES        := 35     ; Maximum lines in a clipboard note before truncating.
+    static CHECKBOX_MODIFIER_KEY := "Alt"  ; To prevent accidental checkbox clicks.  "" = don't require modifer.
+    static DEFAULT_BORDER        := true   ; Whether new notes have borders by default.
+    static CYCLE_FONT_COLOR      := true   ; Should new notes have colored font by default? False = black.
+    static WARN_ON_DELETE_NOTE   := false  ; Whether to show confirmation before deleting notes (except multiple deletion).
     ; Visual shake for alarms settings.
-    static DEFAULT_ALARM_SHAKE   := true       ; Whether new notes have borders by default
-    static SHAKE_STEPS           := 40         ; Total number of shake movements
-    static MIN_SHAKE_DISTANCE    := 0          ; Minimum shake distance in pixels
-    static MAX_SHAKE_DISTANCE    := 12         ; Maximum shake distance in pixels
+    static DEFAULT_ALARM_SHAKE   := true    ; Whether new notes have borders by default.
+    static SHAKE_STEPS           := 40      ; Number of shakes (40 takes about 3 seconds, depending on computer).
+    static MAX_SHAKE_DISTANCE    := 12      ; Maximum shake distance in pixels -- Start with this much shake.
+    static MIN_SHAKE_DISTANCE    := 0       ; Minimum shake distance in pixels -- Fade down to this much.
     ; Sticky note drag area settings.
-    static RESERVE_DRAG_AREA     := 0          ; Whether to reserve space at top for drag area
-    static DRAG_AREA_OFFSET      := 25         ; Y-offset of note text when reserving drag area
-    static NO_RESERVE_OFFSET     := 5          ; Y-offset when not reserving drag area
-    static NO_RESERVE_X_OFFSET   := 25         ; X-offset for drag area when not reserving space (makes room to click checkboxes)
+    static RESERVE_DRAG_AREA     := false   ; Whether to reserve space at top for drag area.
+    static DRAG_AREA_OFFSET      := 25      ; Y-offset of note text when reserving drag area.
+    static NO_RESERVE_OFFSET     := 5       ; Y-offset when not reserving drag area.
+    static NO_RESERVE_X_OFFSET   := 25      ; X-offset for drag area when not reserving space (makes room to click checkboxes).
 }
 
 ; Global Constants
@@ -116,59 +109,72 @@ class StickyNotesConfig {
     ; Removed DEFAULT_HEIGHT since we want natural height
     static DEFAULT_FONT         := "Arial"
     static DEFAULT_FONT_SIZE    := 12
-    static DEFAULT_FONT_COLOR   := "000000"  ; Black
     
-    ; Color options for notes (expanded pastel shades) new notes assume default color in this order.
+    ; Color options for notes (expanded pastel shades) new notes assume default color in this order, starting with a random item from the list.
     static COLORS := Map(
-        "Light Yellow", "FFFFCC",
-        "Soft Sky", "B6D9FF",
-        "Pale Gold", "FFE4B5",
-        "Soft Red", "FFB6B6",
-        "Soft Lime", "E6FFB6",
-        "Mint", "F5FFFA",
-        "Soft Teal", "B6E6E6",
-        "Lavender", "E6E6FA",
-        "Light Green", "E8FFE8",
-        "Peach", "FFDAB9",
-        "Soft Rose", "FFB6D9",
-        "Soft Violet", "E6B6FF",
-        "Soft Salmon", "FFD1B6",
-        "Light Pink", "FFE4E1",
-        "Light Blue", "E6F3FF",
-        "Light Purple", "E6E6FA",
-        "Light Orange", "FFE4C4",
-        "Light Cyan", "E0FFFF",
-        "Light Coral", "FFE4E1",
-        "Soft Sage", "D1E6B6"
+        "Light Yellow"  , "FFFFCC",
+        "Soft Sky"      , "B6D9FF",
+        "Pale Gold"     , "FFE4B5",
+        "Soft Red"      , "FFB6B6",
+        "Soft Lime"     , "E6FFB6",
+        "Mint"          , "F5FFFA",
+        "Soft Teal"     , "B6E6E6",
+        "Lavender"      , "E6E6FA",
+        "Light Green"   , "E8FFE8",
+        "Peach"         , "FFDAB9",
+        "Soft Rose"     , "FFB6D9",
+        "Soft Violet"   , "E6B6FF",
+        "Soft Salmon"   , "FFD1B6",
+        "Light Pink"    , "FFE4E1",
+        "Light Blue"    , "E6F3FF",
+        "Light Purple"  , "E6E6FA",
+        "Light Orange"  , "FFE4C4",
+        "Light Cyan"    , "E0FFFF",
+        "Light Coral"   , "FFE4E1",
+        "Soft Sage"     , "D1E6B6"
     )
     static DEFAULT_BG_COLOR := "FFFFCC"  ; Light yellow
 
-    ; Font color options (expanded darker shades)
+    ; Font color options (expanded darker shades) new notes assume default font color in this order, starting with a random item from the list.
     static FONT_COLORS := Map(
-        "Black", "000000",
-        "Navy Blue", "000080",
-        "Dark Green", "006400",
-        "Dark Red", "8B0000",
-        "Purple", "800080",
-        "Brown", "8B4513",
-        "Dark Gray", "696969",
-        "Maroon", "800000",
-        "Dark Olive", "556B2F",
-        "Indigo", "4B0082",
-        "Dark Slate", "2F4F4F",
-        "Dark Brown", "654321",
-        "Deep Red", "B22222",
-        "Forest Green", "228B22",
-        "Dark Purple", "663399",
-        "Deep Blue", "00008B",
-        "Dark Teal", "008080",
-        "Dark Magenta", "8B008B",
-        "Burgundy", "800020",
-        "Dark Orange", "D2691E"
+        "Black"     , "000000",
+        "Navy Blue"     , "000080",
+        "Dark Green"    , "015701",
+        "Dark Red"      , "8B0000",
+        "Purple"    , "800080",
+        "Brown"         , "8B4513",
+        "Dark Gray"     , "575757",
+        "Maroon"    , "800000",
+        "Dark Olive"    , "435523",
+        "Indigo"        , "4B0082",
+        "Dark Slate"    , "2F4F4F",
+        "Dark Brown"    , "654321",
+        "Deep Red"      , "B22222",
+        "Forest Green"  , "1e701e",
+        "Dark Purple"   , "562b82",
+        "Deep Blue"     , "00008B",
+        "Dark Teal"     , "036666",
+        "Dark Magenta"  , "8B008B",
+        "Burgundy"      , "800020",
+        "Dark Orange"   , "a65012"
     )
     
     ; Font size options
     static FONT_SIZES := [32, 28, 24, 20, 18, 16, 14, 12, 11, 10, 9, 8, 6]
+}
+
+; If ColorThemeIntegrator app is present, uses color settings.
+; Assumes that file is in grandparent folder of this file.
+; ## NOTE ## that this won't affect the color of the notes. 
+; It is for the dialogs. "Note font color" and this font color are different things. 
+settingsFile := A_ScriptDir "\..\colorThemeSettings.ini" 
+If FileExist(SettingsFile) {  ; Get colors from ini file. 
+    fontColor := IniRead(settingsFile, "ColorSettings", "fontColor")
+    listColor := IniRead(settingsFile, "ColorSettings", "listColor")
+    formColor := IniRead(settingsFile, "ColorSettings", "formColor")
+}
+Else { ; If color app not found, uses these hex codes.
+    fontColor := "0x1F1F1F", listColor := "0xFFFFFF", formColor := "0xE5E4E2"
 }
 
 class StickyNotes {
@@ -312,7 +318,7 @@ class StickyNotes {
             bgcolor: this.noteManager.GetNextColor(),
             font: StickyNotesConfig.DEFAULT_FONT,
             fontSize: StickyNotesConfig.DEFAULT_FONT_SIZE,
-            fontColor: StickyNotesConfig.DEFAULT_FONT_COLOR,
+            fontColor: this.noteManager.GetNextFontColor(),
             x: pos.x,  ; Use cascade position
             y: pos.y,
             isOnTop: false,
@@ -798,8 +804,8 @@ class Note {
     bgcolor := ""
     font := ""
     fontSize := 0
-    isBold := false
     fontColor := ""
+    isBold := false
     isOnTop := false
     width := StickyNotesConfig.DEFAULT_WIDTH
     editor := ""
@@ -1430,7 +1436,8 @@ class Note {
     }
         
     Delete(*) {
-        if (MsgBox("Are you sure you want to delete this note?",, "YesNo") = "Yes") {
+        if (!OptionsConfig.WARN_ON_DELETE_NOTE || 
+            MsgBox("Are you sure you want to delete this note?",, "YesNo") = "Yes") {
             try {
                 ; Clean up alarm state if it exists
                 if (this.hasAlarm && StickyNotes.cycleComplete && StickyNotes.cycleComplete.Has(this.id)) {
@@ -1562,17 +1569,37 @@ class NoteManager {
     storage := NoteStorage()
     mainWindow := ""
 
-    __New(mainWindow := "") {
-        this.mainWindow := mainWindow
-    }
-    
-        ; Static properties for cascade positioning
+    ; Static properties for cascade positioning
     static CASCADE_OFFSET := 75      ; Pixels to offset each new note
     static MAX_CASCADE := 10         ; Maximum number of cascaded notes before reset
     static currentCascadeCount := 0  ; Track number of cascaded notes
     static baseX := ""              ; Base X position (will be set on first use)
     static baseY := ""              ; Base Y position (will be set on first use)
-    static currentColorIndex := 0    ; Track current color in rotation
+    static currentColorIndex := NoteManager.InitRandomColorIndex()
+    static currentFontColorIndex := NoteManager.InitRandomFontColorIndex()
+
+    ; Helper methods for initialization
+    static InitRandomColorIndex() {
+        colorCount := 0
+        for _ in StickyNotesConfig.COLORS
+            colorCount++
+        Random start := 1, colorCount
+        LogError("Starting with color index: " (start - 1) "`n")
+        return start - 1  ; -1 because GetNextColor increments first
+    }
+
+    static InitRandomFontColorIndex() {
+        fontColorCount := 0
+        for _ in StickyNotesConfig.FONT_COLORS
+            fontColorCount++
+        Random start := 1, fontColorCount
+        LogError("Starting with font color index: " (start - 1) "`n")
+        return start - 1
+    }
+
+    __New(mainWindow := "") {
+        this.mainWindow := mainWindow
+    }
     
     GetNextColor() {
         ; Convert color map to array for easy indexing
@@ -1580,16 +1607,29 @@ class NoteManager {
         for name, code in StickyNotesConfig.COLORS
             colorCodes.Push(code)
             
-        ; Initialize index if it doesn't exist
-        if (!this.HasProp("currentColorIndex"))
-            this.currentColorIndex := 0
-            
         ; Increment and wrap the index
-        this.currentColorIndex := Mod(this.currentColorIndex + 1, colorCodes.Length)
+        NoteManager.currentColorIndex := Mod(NoteManager.currentColorIndex + 1, colorCodes.Length)
         
         ; Return the next color
-        return colorCodes[this.currentColorIndex + 1]  ; +1 because array is 1-based
+        return colorCodes[NoteManager.currentColorIndex + 1]  ; +1 because array is 1-based
     }
+
+    GetNextFontColor() {
+            ; If cycling is disabled, return black
+            if (!OptionsConfig.CYCLE_FONT_COLOR)
+                return "000000"  ; Black
+                
+            ; Convert font color map to array for easy indexing
+            fontColorCodes := []
+            for name, code in StickyNotesConfig.FONT_COLORS
+                fontColorCodes.Push(code)
+                
+            ; Increment and wrap the index
+            NoteManager.currentFontColorIndex := Mod(NoteManager.currentFontColorIndex + 1, fontColorCodes.Length)
+            
+            ; Return the next color
+            return fontColorCodes[NoteManager.currentFontColorIndex + 1]  ; +1 because array is 1-based
+        }
 
     GetCascadePosition() {
         ; Initialize base position if not set
@@ -1631,7 +1671,7 @@ class NoteManager {
                 bgcolor: this.GetNextColor(),
                 font: StickyNotesConfig.DEFAULT_FONT,
                 fontSize: StickyNotesConfig.DEFAULT_FONT_SIZE,
-                fontColor: StickyNotesConfig.DEFAULT_FONT_COLOR,
+                fontColor: this.GetNextFontColor(),  ; Use cycling font colors
                 x: pos.x,           ; Use cascade position
                 y: pos.y,           ; Use cascade position
                 isOnTop: false,
@@ -1942,11 +1982,21 @@ class NoteStorage {
     LoadNote(id) {
         try {
             sectionName := this.GetNoteSectionName(id)
+            LogError("LoadNote: Starting to load note " id "`n")
             
             ; Check if note exists
             if !this.NoteExists(id) {
+                LogError("LoadNote: Note " id " doesn't exist`n")
                 return false
             }
+            
+            ; Load raw content from INI
+            rawContent := IniRead(OptionsConfig.INI_FILE, sectionName, "Content", "")
+            LogError("LoadNote: Raw content length: " StrLen(rawContent) "`n")
+            
+            ; Convert literal '\n' back to actual newlines
+            unescapedContent := StrReplace(rawContent, "\n", "`n")
+            LogError("LoadNote: Unescaped content length: " StrLen(unescapedContent) "`n")
             
             ; Load raw content from INI
             rawContent := IniRead(OptionsConfig.INI_FILE, sectionName, "Content", "")
@@ -1962,7 +2012,7 @@ class NoteStorage {
                 font: IniRead(OptionsConfig.INI_FILE, sectionName, "Font", StickyNotesConfig.DEFAULT_FONT),
                 fontSize: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "FontSize", StickyNotesConfig.DEFAULT_FONT_SIZE)),
                 isBold: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "IsBold", "0")),
-                fontColor: IniRead(OptionsConfig.INI_FILE, sectionName, "FontColor", StickyNotesConfig.DEFAULT_FONT_COLOR),
+                fontColor: IniRead(OptionsConfig.INI_FILE, sectionName, "FontColor", "000000"),
                 x: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "PosX", "")),
                 y: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "PosY", "")),
                 isOnTop: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "IsOnTop", "0")),
@@ -1988,6 +2038,7 @@ class NoteStorage {
 
             return noteData
         } catch as err {
+            LogError("LoadNote: Error loading note " id ": " err.Message "`n")
             return false
         }
     }
@@ -2528,12 +2579,13 @@ class NoteEditor {
     }
 
     DeleteNote(*) {
-        if (MsgBox("Are you sure you want to delete this note?",, "YesNo 0x40000") = "Yes") {
+        if (!OptionsConfig.WARN_ON_DELETE_NOTE || 
+            MsgBox("Are you sure you want to delete this note?",, "YesNo 0x40000") = "Yes") {
             ; Use the app's noteManager to delete this note
             app.noteManager.DeleteNote(this.note.id)
         }
     }
-    
+
     Show(*) {
         this.gui.Show("AutoSize")
     }
@@ -2959,7 +3011,7 @@ class MainWindow {
 
         ; Create button group 1 - Core Functions
         this.gui.Add("Button", "x10 y+10 w" buttonW " h30", "&New Note")
-            .OnEvent("Click", (*) => app.noteManager.CreateNote())
+            .OnEvent("Click", (*) => app.CreateNewNote())
         
         this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "New From Clpbrd")
             .OnEvent("Click", (*) => app.CreateClipboardNote())
@@ -3208,20 +3260,28 @@ class MainWindow {
             storage := NoteStorage()
             noteData := storage.LoadNote(selectedIds[1])
             if (noteData) {
-                preview := noteData.content
-                if (StrLen(preview) > 500)
-                    preview := SubStr(preview, 1, 497) "..."
-                
-                if (MsgBox("Are you sure you want to delete this note?`n`nContent:`n" preview,
-                    "Delete Note", "YesNo 0x30 Owner" this.gui.Hwnd) = "Yes") {
+                if (!OptionsConfig.WARN_ON_DELETE_NOTE) {
+                    ; Skip warning if disabled
                     this.gui.Opt("+Disabled")  ; Prevent user interaction during deletion
                     app.noteManager.DeleteNote(selectedIds[1])
                     this.gui.Opt("-Disabled")  ; Re-enable user interaction
                     this.PopulateNoteList()    ; Single refresh
+                } else {
+                    preview := noteData.content
+                    if (StrLen(preview) > 500)
+                        preview := SubStr(preview, 1, 497) "..."
+                    
+                    if (MsgBox("Are you sure you want to delete this note?`n`nContent:`n" preview,
+                        "Delete Note", "YesNo 0x30 Owner" this.gui.Hwnd) = "Yes") {
+                        this.gui.Opt("+Disabled")  ; Prevent user interaction during deletion
+                        app.noteManager.DeleteNote(selectedIds[1])
+                        this.gui.Opt("-Disabled")  ; Re-enable user interaction
+                        this.PopulateNoteList()    ; Single refresh
+                    }
                 }
             }
         } else {
-            ; Multiple note deletion
+            ; Multiple note deletion - always show warning regardless of setting
             if (MsgBox("Are you sure you want to delete " selectedIds.Length " notes?",
                 "Delete Multiple Notes", "YesNo 0x30 Owner" this.gui.Hwnd) = "Yes") {
                 ; Temporarily disable list updates

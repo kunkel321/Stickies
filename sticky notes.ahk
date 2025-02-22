@@ -6,7 +6,7 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    2-18-2025
+Version:    2-22-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -23,40 +23,44 @@ Features, Functionality, Usage, and Tips:
 - Stick notes to windows: Notes can be attached to specific application windows
 - Window persistence: Notes "stuck to" specific windows reappear when window reopens
 - Notes can be unstuck by clicking the window button again
+- Alarm System: Set one-time or recurring alarms with custom sounds
 - Set alarms for individual notes with optional weekly recurrence
 - Many editor dialog options support accelerator keys (Alt+A for alarm, etc.)
-- Visual alert: Notes can shake when alarms trigger (configurable)
+- Visual alert: Notes can shake when alarms trigger
 - Multiple alarm repeats: Choose between once, 3x, or 10x alarm repetitions
 - Alarm sounds: Custom alarm sounds can be added to the Sounds folder
 - Smart alarm management: System detects and reports missed alarms on startup
 - Main window with note management, preview, and search functionality
 - Color-coded notes: Notes maintain their color scheme in preview list
-- Rich preview: Hover over notes in manager for formatted preview with original fonts/colors
+- Rich preview: Right-click notes in manager for formatted preview with original fonts/colors
 - Search functionality: Filter notes by content in main window
 - Selective display: Filter note list to show only hidden or visible notes
+- Include recently deleted note in hidden/visible listview filter
+- Deleted notes are identified by deletion time appearing in listview
 - Access main window with Win+Shift+S (hidden by default)
+- Resize main window, by dragging edge/corner, to see more of note text in listview
 - Notes' show alarm times and window attachments in note manager listview
-- Bulk operations: Select multiple notes to hide/unhide/delete simultaneously
+- Multiple selection: Use Ctrl+Click to select multiple notes in manager
+- Bulk operations: Select multiple notes to hide/unhide/delete/undelete simultaneously
 - Notes are created using Win+Shift+N or from clipboard with Win+Shift+C
-- Hotkeys can be changed near top of code
-- Tips button in note manager shows hotkeys and other tips
+- Hotkeys and more can be changed near top of code
+- Tips button in note manager shows current hotkeys and other tips
+- Double-click top bar or right-click for editing options
 - Drag notes by their top bar to reposition
 - Configurable drag area: Option to maximize note space by minimizing drag area
 - Notes auto-save position when moved
 - Turn off note deletion warning
-- Double-click top bar or right-click for editing options
-- System tray icon provides quick access to common functions
-- Start with Windows: Option available in tray menu
+- Undelete notes
+- Deleted notes are purged from ini file after 7 days (Configurable)
 - Checkbox Creation: Any text line starting with [] or [x] becomes an interactive checkbox
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
-- Alarm System: Set one-time or recurring alarms with custom sounds
 - All note data saved to sticky_notes.ini in script directory
+- Hidden or deleted notes can be restored through main window or via note context menu
+- Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
 - Use manual "Save Status" after significant changes
 - "Load/Reload Notes" refreshes all notes from storage
-- Hidden notes can be restored through main window
-- Check error_log.txt for troubleshooting (if enabled; warning: system hog)
-- Right-click menu provides quick access to several functions
-- Multiple selection: Use Ctrl+Click to select multiple notes in manager
+- System tray icon provides quick access to common functions
+- Start with Windows: Option available in tray menu
 
 Known Issues:
 -------------
@@ -78,7 +82,8 @@ Justme for his ToolTipOptions and LV_Colors classes.
 
 ; Hotkeys and other Configuration.  Change if desired.
 class OptionsConfig {
-    static ERROR_LOG             := false  ; Mostly for AI feedback.  Causes lag.  Recommend setting 'false.'      
+    static DEBUG_LOG             := 0      ; Mostly for AI feedback.  Recommend setting 'false.'      
+    static ERROR_LOG             := 0      ; Mostly for AI feedback.  Recommend setting 'false.'      
     static TOGGLE_MAIN_WINDOW    := "+#s"  ; Shift+Win+S. Shows/Hide Note Manager window.
     static NEW_NOTE              := "+#n"  ; Shift+Win+N. New note.
     static NEW_CLIPBOARD_NOTE    := "+#c"  ; Shift+Win+C. New note from text on clipboard.
@@ -90,7 +95,7 @@ class OptionsConfig {
     static CHECKBOX_MODIFIER_KEY := "Alt"  ; To prevent accidental checkbox clicks.  "" = don't require modifer.
     static DEFAULT_BORDER        := true   ; Whether new notes have borders by default.
     static CYCLE_FONT_COLOR      := true   ; Should new notes have colored font by default? False = black.
-    static WARN_ON_DELETE_NOTE   := false  ; Whether to show confirmation before deleting notes (except multiple deletion).
+    static WARN_ON_DELETE_NOTE   := true   ; Whether to show confirmation before deleting notes (except multiple deletion).
     ; Visual shake for alarms settings.
     static DEFAULT_ALARM_SHAKE   := true    ; Whether new notes have borders by default.
     static SHAKE_STEPS           := 40      ; Number of shakes (40 takes about 3 seconds, depending on computer).
@@ -101,6 +106,10 @@ class OptionsConfig {
     static DRAG_AREA_OFFSET      := 25      ; Y-offset of note text when reserving drag area.
     static NO_RESERVE_OFFSET     := 5       ; Y-offset when not reserving drag area.
     static NO_RESERVE_X_OFFSET   := 25      ; X-offset for drag area when not reserving space (makes room to click checkboxes).
+    ; Winodws hidden from 'Select Window for Sticking' listbox.
+    static BLACKLISTED_WINDOWS  := ["Sticky Notes", "Edit Note", "Set Alarm", "Select Window", "Rainmeter"]
+    static DAYS_DELETED_KEPT := 7    ; Number of days to keep deleted notes
+    static DEFAULT_SHOW_DELETED := false  ; Whether to show deleted notes in listview by default
 }
 
 ; Global Constants
@@ -194,6 +203,8 @@ class StickyNotes {
         this.LoadNotesOnStartup()
         this.CheckMissedAlarms()
         SetTimer(this.CheckAlarms.Bind(this), 1000)
+        ; Purge old deleted notes on startup
+        (NoteStorage()).PurgeOldDeletedNotes()
     }
     
     InitializeComponents() {
@@ -332,9 +343,7 @@ class StickyNotes {
     }
 
     CreateNewNote(*) {
-        LogError("Starting CreateNewNote at " A_TickCount "`n")
         noteId := this.noteManager.CreateNote()
-        LogError("CreateNewNote completed at " A_TickCount "`n")
         
         ; Auto-open editor if enabled
         if (OptionsConfig.AUTO_OPEN_EDITOR && noteId) {
@@ -348,11 +357,8 @@ class StickyNotes {
     }
 
     ResetNoteAlarmCycle(noteId) {
-        LogError("ResetNoteAlarmCycle called for " noteId "`n")
-        
         if (this.cycleComplete.Has(noteId)) {
             this.cycleComplete.Delete(noteId)
-            LogError("Cycle reset for " noteId "`n")
         }
     }
 
@@ -372,7 +378,6 @@ class StickyNotes {
         }
         
         currentTime := FormatTime(, "h:mm tt")
-        LogError("Checking alarms at " currentTime "`n")
         currentDay := FormatTime(, "ddd")
         
         ; Convert current day to short format
@@ -396,7 +401,6 @@ class StickyNotes {
             ; Only log when alarm state changes
             static lastAlarmState := Map()
             if (!lastAlarmState.Has(id) || lastAlarmState[id] != note.hasAlarm) {
-                LogError("Alarm state changed for note " id ": hasAlarm=" note.hasAlarm "`n")
                 lastAlarmState[id] := note.hasAlarm
             }
 
@@ -406,7 +410,6 @@ class StickyNotes {
                     this.playCount.Delete(id)
                     this.lastPlayTime.Delete(id)
                     this.cycleComplete.Delete(id)
-                    LogError("Reset tracking for note " id " - time changed`n")
                 }
             }
             
@@ -421,8 +424,6 @@ class StickyNotes {
         for alarmNote in activeAlarms {
             id := alarmNote.id
             note := alarmNote.note
-            
-            LogError("Note " id ": Alarm set for " note.alarmTime "`n")
                 
             if (currentTime != note.alarmTime)
                 continue
@@ -435,11 +436,8 @@ class StickyNotes {
             
             ; Check if we've already handled this alarm
             if (this.cycleComplete.Has(id) && this.cycleComplete[id]) {
-                LogError("Skipping note " id " - cycle complete`n")
                 continue
             }
-
-            LogError("Checking note " id " - currentTime: " currentTime " alarmTime: " note.alarmTime "`n")
                         
             ; Initialize play count for this note if needed
             if (!this.playCount.Has(id)) {
@@ -464,12 +462,10 @@ class StickyNotes {
                     }
                     
                     this.lastPlayTime[id] := A_Now
-                    LogError("Played alarm, count now: " this.playCount[id] "`n")
                 }
                 
                 ; Check if we've finished all repeats
                 if (this.playCount.Has(id) && this.playCount[id] >= note.alarmRepeatCount) {
-                    LogError("Completed all repeats (" note.alarmRepeatCount ")`n")
                         
                     this.cycleComplete[id] := true
                     
@@ -506,8 +502,6 @@ class StickyNotes {
         )
         shortDay := dayMap[currentDay]
 
-        LogError("Starting CheckMissedAlarms check at " FormatTime(A_Now, "HH:mm:ss") "`n")
-
         notesWithAlarms := []
         for id, note in this.noteManager.notes {
             if (note.hasAlarm) {
@@ -517,7 +511,6 @@ class StickyNotes {
         }
 
         if (notesWithAlarms.Length = 0) {
-            LogError("No notes with alarms found`n")
             return
         }
 
@@ -578,11 +571,9 @@ class StickyNotes {
         
         ; Start or stop timer based on whether we have stuck notes
         if (hasStuckNotes && !this.windowCheckTimer) {
-            LogError("Starting window check timer`n")
             this.windowCheckTimer := SetTimer(this.CheckStuckWindows.Bind(this), 500)  ; Changed from 100 to 500ms
         }
         else if (!hasStuckNotes && this.windowCheckTimer) {
-            LogError("Stopping window check timer`n")
             SetTimer(this.windowCheckTimer, 0)
             this.windowCheckTimer := 0
         }
@@ -594,9 +585,7 @@ class StickyNotes {
         for id, note in this.noteManager.notes {
             if (!note.isStuckToWindow)
                 continue
-                    
-            LogError("Checking stuck note " id " for window " note.stuckWindowTitle "`n")
-            
+
             ; Simple window existence check
             targetWindow := WinExist("ahk_class " note.stuckWindowClass)
             windowExists := (targetWindow && InStr(WinGetTitle("ahk_id " targetWindow), note.stuckWindowTitle))
@@ -609,7 +598,6 @@ class StickyNotes {
                 } else if (note.gui) {
                     isCurrentlyVisible := WinExist("ahk_id " note.gui.Hwnd) ? true : false
                 }
-                LogError("Note " id " visibility check - isCurrentlyVisible: " isCurrentlyVisible "`n")
             } catch Error as err {
                 LogError("Error checking note " id " visibility: " err.Message "`n")
                 isCurrentlyVisible := false
@@ -621,10 +609,8 @@ class StickyNotes {
                 isHidden := storage.IsStuckNoteHidden(id)
                 
                 if (windowExists && !isHidden && !isCurrentlyVisible) {
-                    LogError("Showing stuck note " id " with border: " (note.borderGui ? "yes" : "no") "`n")
                     note.Show()
                 } else if (!windowExists && isCurrentlyVisible) {
-                    LogError("Hiding stuck note " id " with border: " (note.borderGui ? "yes" : "no") "`n")
                     note.Hide()
                 }
                 
@@ -851,11 +837,7 @@ class Note {
         this.isStuckToWindow := options.HasOwnProp("isStuckToWindow") ? !!options.isStuckToWindow : false
         this.stuckWindowTitle := options.HasOwnProp("stuckWindowTitle") ? options.stuckWindowTitle : ""
         this.stuckWindowClass := options.HasOwnProp("stuckWindowClass") ? options.stuckWindowClass : ""
-        
-        LogError("Initializing note " idNum " with window properties:`n")
-        LogError("  isStuckToWindow: " this.isStuckToWindow "`n")
-        LogError("  stuckWindowTitle: " this.stuckWindowTitle "`n")
-        LogError("  stuckWindowClass: " this.stuckWindowClass "`n")
+
         ; Create the basic GUI
         if (this.isOnTop) {
             this.gui := Gui("-Caption +AlwaysOnTop +Owner")
@@ -1045,7 +1027,6 @@ class Note {
     }
 
     DoubleClickHandler(*) {
-        LogError("Double-click detected`n")
         this.Edit()
     }
 
@@ -1077,7 +1058,6 @@ class Note {
                     this.currentX := x
                     this.currentY := y
                     storage.SaveNote(this)
-                    LogError("Saved position for note " this.id " after losing focus: x=" x ", y=" y "`n")
                 } else {
                     LogError("Note " this.id " no longer exists - skipping position save`n")
                 }
@@ -1136,6 +1116,7 @@ class Note {
         noteMenu.Add("Save Status", (*) => app.noteManager.SaveAllNotes())
         noteMenu.Add("Show Hidden", (*) => app.noteManager.ShowHiddenNotes())
         noteMenu.Add("ReLoad Notes", (*) => app.noteManager.LoadSavedNotes())
+        noteMenu.Add("Undelete a note", (*) => app.mainwindow.ShowDeletedNotes())
 
         noteMenu.Show()
     }
@@ -1224,12 +1205,11 @@ class Note {
         ; Save to storage immediately
         storage := NoteStorage()
         storage.SaveNote(this)
-                
-        LogError("Playing alarm for note " this.id "`n")
+
     }
 
     DeleteAlarm(*) {
-        if (MsgBox("Are you sure you want to delete this alarm?",, "YesNo") = "Yes") {
+        if (MsgBox("Are you sure you want to delete this alarm?",, "YesNo 0x30 Owner" app.mainWindow.gui.Hwnd) = "Yes") {
             try {
                 this.hasAlarm := false
                 this.alarmTime := ""
@@ -1278,7 +1258,6 @@ class Note {
                 this.isShaking := true
                 targetGui.GetPos(&originalX, &originalY)
                 shakeStep := 0
-                LogError("Starting shake animation for note " this.id "`n")
             }
             
             ; Calculate diminishing shake distance
@@ -1306,7 +1285,6 @@ class Note {
                 this.isShaking := false
                 shakeStep := 0
                 SetTimer(, 0)  ; Stop timer
-                LogError("Completed shake animation for note " this.id "`n")
                 return
             }
             
@@ -1401,7 +1379,6 @@ class Note {
             MonitorGet(MonitorGetPrimary(), &left, &top, &right, &bottom)
             ; Check if position is within screen bounds
             if (x < left || x > right || y < top || y > bottom) {
-                LogError("Position out of bounds - x: " x ", y: " y " (screen: " left "," top "," right "," bottom ")`n")
                 return false
                 }
             }
@@ -1437,7 +1414,7 @@ class Note {
         
     Delete(*) {
         if (!OptionsConfig.WARN_ON_DELETE_NOTE || 
-            MsgBox("Are you sure you want to delete this note?",, "YesNo") = "Yes") {
+            MsgBox("Are you sure you want to delete this note?",, "0x30 YesNo Owner" app.mainwindow.gui.Hwnd) = "Yes") {
             try {
                 ; Clean up alarm state if it exists
                 if (this.hasAlarm && StickyNotes.cycleComplete && StickyNotes.cycleComplete.Has(this.id)) {
@@ -1583,18 +1560,20 @@ class NoteManager {
         colorCount := 0
         for _ in StickyNotesConfig.COLORS
             colorCount++
-        Random start := 1, colorCount
-        LogError("Starting with color index: " (start - 1) "`n")
-        return start - 1  ; -1 because GetNextColor increments first
+        
+        ; Try the random generation
+        result := Random(1, colorCount) - 1
+        return result
     }
 
     static InitRandomFontColorIndex() {
         fontColorCount := 0
         for _ in StickyNotesConfig.FONT_COLORS
             fontColorCount++
-        Random start := 1, fontColorCount
-        LogError("Starting with font color index: " (start - 1) "`n")
-        return start - 1
+
+        ; Try the random generation
+        result := Random(1, fontColorCount) - 1
+        return result
     }
 
     __New(mainWindow := "") {
@@ -1700,17 +1679,13 @@ class NoteManager {
 
     SaveAllNotes() {
         try {
-            LogError("`nStarting SaveAllNotes...`n")
-            LogError("Current number of notes: " this.notes.Count "`n")
-
             for id, note in this.notes {
                 try {
                     ; Get and log current position
                     x := 0
                     y := 0
                     note.gui.GetPos(&x, &y)
-                    LogError("Saving note " id " at position x=" x ", y=" y "`n")
-                    
+
                     ; Update position properties
                     note.currentX := x
                     note.currentY := y
@@ -1722,8 +1697,6 @@ class NoteManager {
                     LogError("Error saving note " id ": " err.Message "`n")
                 }
             }
-            
-            LogError("SaveAllNotes complete`n")
             return true
         } catch as err {
                 LogError("Error in SaveAllNotes: " err.Message "`n")
@@ -1733,45 +1706,38 @@ class NoteManager {
 
     LoadSavedNotes() {
         try {
-            LogError("Starting LoadSavedNotes...`n")
-            
-            ; First destroy all existing note GUIs and editors
-            LogError("Destroying existing notes...`n")
             for id, existingNote in this.notes {
-                LogError("Attempting to destroy note " id "`n")
                 if (!existingNote.Destroy()) {
-                    LogError("Failed to destroy note " id "`n")
                 }
             }
-            
+
             ; Reset note tracking completely
-            LogError("Resetting note tracking...`n")
             this.notes := Map()
             
             ; Get all saved notes from storage
-            LogError("Loading notes from storage...`n")
             savedNotes := this.storage.LoadAllNotes()
-            LogError("Found " savedNotes.Length " notes in storage`n")
             
             ; Process each saved note
             for noteData in savedNotes {
                 try {
-                    LogError("Processing note " noteData.id "`n")
                     ; Verify note exists in storage before creating
                     if (!this.storage.NoteExists(noteData.id)) {
-                        LogError("Note " noteData.id " doesn't exist in storage - skipping`n")
+                        continue
+                    }
+                    
+                    ; Skip creating GUI for deleted notes
+                    deletedTime := IniRead(OptionsConfig.INI_FILE, "Note-" noteData.id, "DeletedTime", "")
+                    if (deletedTime) {
                         continue
                     }
                     
                     ; Create GUI if note is visible OR has an alarm
                     if (!noteData.isHidden || (noteData.hasAlarm && noteData.alarmTime)) {
-                        LogError("Creating GUI for note " noteData.id " (Visible: " (!noteData.isHidden ? "Yes" : "No") ", Alarmed: " (noteData.hasAlarm ? "Yes" : "No") ")`n")
                         newNote := Note(noteData.id, noteData)
                         this.notes[noteData.id] := newNote
                         
                         ; If note should be hidden but has an alarm, hide it after creation
                         if (noteData.isHidden) {
-                            LogError("Hiding alarmed note " noteData.id "`n")
                             newNote.gui.Hide()
                             if (newNote.borderGui && newNote.borderGui.Gui1)
                                 newNote.borderGui.Gui1.Hide()
@@ -1782,8 +1748,6 @@ class NoteManager {
                     continue
                 }
             }
-            
-            LogError("LoadSavedNotes complete`n")
             return true
         } catch as err {
             LogError("Error in LoadSavedNotes: " err.Message)
@@ -1792,13 +1756,9 @@ class NoteManager {
     }
 
     DeleteNote(id) {
-        LogError("DeleteNote called for id " id "`n")
-        LogError("Current notes in manager: " this.notes.Count "`n")
         if !this.notes.Has(id) {
-            LogError("Note " id " not found in manager`n")
             return false
         }
-            
         try {
             ; Get note reference
             note := this.notes[id]
@@ -1816,8 +1776,7 @@ class NoteManager {
             ; Update main window list if it exists
             if (this.mainWindow)
                 this.mainWindow.PopulateNoteList()
-                
-            LogError("Successfully deleted note " id "`n")
+
             return true
         } catch as err {
             LogError("Error in DeleteNote for id " id ": " err.Message "`n")
@@ -1971,6 +1930,10 @@ class NoteStorage {
                 IniWrite(note.stuckWindowTitle, OptionsConfig.INI_FILE, sectionName, "StuckWindowTitle")
                 IniWrite(note.stuckWindowClass, OptionsConfig.INI_FILE, sectionName, "StuckWindowClass")
             }
+
+            ; If note is deleted, save deletion timestamp
+            if (note.HasOwnProp("deletedTime") && note.deletedTime)
+                IniWrite(note.deletedTime, OptionsConfig.INI_FILE, sectionName, "DeletedTime")
                 
             return true
         } catch as err {  ; <- This was also missing its closing brace
@@ -1978,26 +1941,100 @@ class NoteStorage {
             return false
         }
     }
-        
+    PurgeOldDeletedNotes() {
+        try {
+            sections := IniRead(OptionsConfig.INI_FILE)
+            if !sections
+                return
+                
+            currentTime := FormatTime(A_Now, "yyyyMMddHHmmss")
+            cutoffTime := FormatTime(DateAdd(A_Now, -OptionsConfig.DAYS_DELETED_KEPT, "Days"), "yyyyMMddHHmmss")
+            
+            loop parse, sections, "`n", "`r" {
+                if RegExMatch(A_LoopField, "Note-(\d{14})", &match) {
+                    noteId := match[1]
+                    deletedTime := IniRead(OptionsConfig.INI_FILE, A_LoopField, "DeletedTime", "")
+                    
+                    if (deletedTime && deletedTime < cutoffTime) {
+                        IniDelete(OptionsConfig.INI_FILE, A_LoopField)
+                    }
+                }
+            }
+        } catch Error as err {
+            LogError("Error in PurgeOldDeletedNotes: " err.Message "`n")
+        }
+    }
+
+    GetDeletedNotes() {
+        try {
+            deletedNotes := []
+            
+            sections := IniRead(OptionsConfig.INI_FILE)
+            if !sections {
+                return deletedNotes
+            }
+
+            loop parse, sections, "`n", "`r" {
+                if RegExMatch(A_LoopField, "Note-(\d{14})", &match) {
+                    noteId := match[1]
+                    
+                    ; Check if note is marked as deleted
+                    deletedTime := IniRead(OptionsConfig.INI_FILE, A_LoopField, "DeletedTime", "")
+                    if (deletedTime) {
+                        if noteData := this.LoadNote(noteId) {
+                            noteData.deletedTime := deletedTime  ; Add deletion time to note data
+                            deletedNotes.Push(noteData)
+                        }
+                    }
+                }
+            }
+
+            return deletedNotes
+        } catch Error as err {
+            LogError("Error in GetDeletedNotes: " err.Message "`n")
+            return []
+        }
+    }
+
+    UndeleteNote(id) {
+        try {
+            sectionName := this.GetNoteSectionName(id)
+
+            ; Verify note exists
+            if (!this.NoteExists(id)) {
+                return false
+            }
+            
+            ; Remove deletion timestamp
+            IniDelete(OptionsConfig.INI_FILE, sectionName, "DeletedTime")
+            
+            ; Verify deletion timestamp was removed
+            if (IniRead(OptionsConfig.INI_FILE, sectionName, "DeletedTime", "") != "") {
+                return false
+            }
+
+            return true
+        } catch Error as err {
+            LogError("Error in UndeleteNote: " err.Message "`n")
+            return false
+        }
+    }
+
     LoadNote(id) {
         try {
             sectionName := this.GetNoteSectionName(id)
-            LogError("LoadNote: Starting to load note " id "`n")
-            
+
             ; Check if note exists
             if !this.NoteExists(id) {
-                LogError("LoadNote: Note " id " doesn't exist`n")
                 return false
             }
             
             ; Load raw content from INI
             rawContent := IniRead(OptionsConfig.INI_FILE, sectionName, "Content", "")
-            LogError("LoadNote: Raw content length: " StrLen(rawContent) "`n")
-            
+
             ; Convert literal '\n' back to actual newlines
             unescapedContent := StrReplace(rawContent, "\n", "`n")
-            LogError("LoadNote: Unescaped content length: " StrLen(unescapedContent) "`n")
-            
+
             ; Load raw content from INI
             rawContent := IniRead(OptionsConfig.INI_FILE, sectionName, "Content", "")
             
@@ -2030,11 +2067,6 @@ class NoteStorage {
                 stuckWindowTitle: IniRead(OptionsConfig.INI_FILE, sectionName, "StuckWindowTitle", ""),
                 stuckWindowClass: IniRead(OptionsConfig.INI_FILE, sectionName, "StuckWindowClass", "")
             }
-            
-            LogError("Loading note " id " with window properties:`n")
-            LogError("  isStuckToWindow: " noteData.isStuckToWindow "`n")
-            LogError("  stuckWindowTitle: " noteData.stuckWindowTitle "`n")
-            LogError("  stuckWindowClass: " noteData.stuckWindowClass "`n")
 
             return noteData
         } catch as err {
@@ -2044,6 +2076,7 @@ class NoteStorage {
     }
 
     static isLoading := false
+
 
     LoadAllNotes() {
         try {
@@ -2060,46 +2093,31 @@ class NoteStorage {
                 NoteStorage.isLoading := false
                 return notes
             }
+
+            validSections := Map()  ; Change to Map to prevent duplicates
             
-            LogError("LoadAllNotes - Before loading sections, verifying each section exists...`n")
-            validSections := ""
             Loop Parse, sections, "`n", "`r" {
                 if RegExMatch(A_LoopField, "Note-(\d{14})", &match) {
                     noteId := match[1]
-                    ; Explicitly check if the section still exists
-                    if (IniRead(OptionsConfig.INI_FILE, A_LoopField, "Content", "") != "") {
-                        validSections .= A_LoopField "`n"
-                        LogError("Found valid section: " A_LoopField "`n")
-                    } else {
-                        LogError("Found invalid/deleted section: " A_LoopField "`n")
-                    }
-                }
-            }
-            sections := validSections
-            
-            LogError("Reading sections from INI file...`n")
-            loop parse, sections, "`n", "`r" {
-                ; Update regex to match new timestamp format
-                if RegExMatch(A_LoopField, "Note-(\d{14})", &match) {
-                    noteId := match[1]
-                    LogError("Found section for note " noteId "`n")
                     
-                    ; Verify section still exists before loading
-                    if (!this.NoteExists(noteId)) {
-                        LogError("Section appears deleted for note " noteId " - skipping`n")
+                    ; Skip if we've already processed this ID
+                    if (validSections.Has(noteId))
                         continue
-                    }
-                    
-                    if noteData := this.LoadNote(noteId) {
-                        LogError("Successfully loaded note " noteId "`n")
-                        notes.Push(noteData)
-                    } else {
-                        LogError("Failed to load note " noteId "`n")
+                        
+                    ; Check if the section exists
+                    if (IniRead(OptionsConfig.INI_FILE, A_LoopField, "Content", "") != "") {
+                        validSections[noteId] := A_LoopField
                     }
                 }
             }
             
-            LogError("LoadAllNotes complete - found " notes.Length " valid notes`n")
+            ; Load each valid note once
+            for noteId, section in validSections {
+                if noteData := this.LoadNote(noteId) {
+                    notes.Push(noteData)
+                }
+            }
+
             NoteStorage.isLoading := false
             return notes
             
@@ -2109,7 +2127,7 @@ class NoteStorage {
             return []
         }
     }
-    
+        
     GetHiddenNotes() {
         try {
             hiddenNotes := []
@@ -2183,39 +2201,36 @@ class NoteStorage {
     DeleteNote(id) {
         try {
             sectionName := this.GetNoteSectionName(id)
-            LogError("Starting deletion of section " sectionName " from INI file`n")
-            
+
             ; Get all sections
             sections := IniRead(OptionsConfig.INI_FILE)
             
-            ; Delete the section
-            IniDelete(OptionsConfig.INI_FILE, sectionName)
-            LogError("Attempted deletion of section " sectionName "`n")
-            
-            ; Verify deletion
-            if (this.NoteExists(id)) {
-                LogError("WARNING: First deletion attempt failed - trying again`n")
-                ; Try more aggressive deletion
-                Loop 3 {
-                    Sleep(50)  ; Give filesystem time
-                    IniDelete(OptionsConfig.INI_FILE, sectionName)
-                    if (!this.NoteExists(id)) {
-                        LogError("Deletion successful on attempt " A_Index "`n")
-                        break
-                    }
-                }
-            }
-            
-            ; Final verification
-            if (this.NoteExists(id)) {
-                LogError("ERROR: Failed to delete section after multiple attempts`n")
+            ; Verify section exists
+            if (!this.NoteExists(id)) {
                 return false
             }
+                
+            ; Instead of deleting, mark as deleted with timestamp
+            IniWrite(FormatTime(A_Now, "yyyyMMddHHmmss"), OptionsConfig.INI_FILE, sectionName, "DeletedTime")
             
-            LogError("Successfully deleted section " sectionName "`n")
+            ; Verify deletion timestamp was written
+            if (IniRead(OptionsConfig.INI_FILE, sectionName, "DeletedTime", "") = "") {
+                return false
+            }
+
             return true
+            
         } catch Error as err {
             LogError("Error in NoteStorage.DeleteNote for id " id ": " err.Message "`n")
+            return false
+        }
+    }
+
+    IsNoteDeleted(id) {
+        try {
+            sectionName := this.GetNoteSectionName(id)
+            return IniRead(OptionsConfig.INI_FILE, sectionName, "DeletedTime", "") != ""
+        } catch {
             return false
         }
     }
@@ -2385,10 +2400,6 @@ class NoteEditor {
             ? this.note.alarmTime  (this.note.alarmDays ?  "-" this.note.alarmDays : "") : "Add &Alarm..."
         this.addAlarmBtn := this.gui.Add("Button", "xp+6 yp+16 w" (editorWidth - 25), addAlarmBtnText)
         this.addAlarmBtn.OnEvent("Click", this.ShowAlarmDialog.Bind(this))
-        
-        LogError("Setting stick button text for note " this.note.id "`n")
-        LogError("  isStuckToWindow: " this.note.isStuckToWindow "`n")
-        LogError("  stuckWindowTitle: " this.note.stuckWindowTitle "`n")
 
         ; stick to window button
         stickBtnText := "Stick to &Window..."
@@ -2397,7 +2408,6 @@ class NoteEditor {
             stickBtnText := StrLen(this.note.stuckWindowTitle) > 30 
                 ? SubStr(this.note.stuckWindowTitle, 1, 27) "..."
                 : this.note.stuckWindowTitle
-            LogError("Setting stick button text to: " stickBtnText "`n")
         }
 
         this.stickToWindowBtn := this.gui.Add("Button", "xp y+5 w" (editorWidth - 25), stickBtnText)
@@ -2475,6 +2485,7 @@ class NoteEditor {
         for hwnd in ids {
             title := WinGetTitle(hwnd)
             class := WinGetClass(hwnd)
+            shouldSkip := false
             
             ; Skip if no title or if it's our own GUI
             if (title = "" || hwnd = this.gui.Hwnd || hwnd = stickyGui.Hwnd)
@@ -2482,6 +2493,23 @@ class NoteEditor {
                 
             ; Skip certain system windows
             if (class ~= "i)^(Shell_TrayWnd|Windows.UI.Core.CoreWindow)$")
+                continue
+            
+            ; Skip blacklisted windows
+            for blacklistedTitle in OptionsConfig.BLACKLISTED_WINDOWS {
+                try {
+                    if (InStr(title, blacklistedTitle)) {
+                        shouldSkip := true
+                        break
+                    }
+                } catch Error as err {
+                    ; Safely handle any regex or comparison errors
+                    LogError("Window filtering error: " err.Message "`n")
+                }
+            }
+            
+            ; Skip if the window is identified as a Sticky Note
+            if (shouldSkip || InStr(title, "Note-"))
                 continue
                 
             lv.Add(, title, class)
@@ -2580,7 +2608,7 @@ class NoteEditor {
 
     DeleteNote(*) {
         if (!OptionsConfig.WARN_ON_DELETE_NOTE || 
-            MsgBox("Are you sure you want to delete this note?",, "YesNo 0x40000") = "Yes") {
+            MsgBox("Are you sure you want to delete this note?",, "YesNo 0x40000 Owner" app.mainwindow.gui.Hwnd) = "Yes" ) {
             ; Use the app's noteManager to delete this note
             app.noteManager.DeleteNote(this.note.id)
         }
@@ -2796,15 +2824,12 @@ class AlarmDialog {
         newTime := Format("{1}:{2:02d} {3}", hour, minute, ampm)
         
         ; Always reset cycle state when saving any alarm
-        LogError("Resetting cycle state for note " this.note.id "`n")
         app.ResetNoteAlarmCycle(this.note.id)
         
         ; Update alarm properties
         this.note.alarmTime := newTime
         this.note.hasAlarm := true
-        
-        LogError("New alarm set for note " this.note.id " at " newTime "`n")
-        
+
         ; Save sound
         this.note.alarmSound := AlarmConfig.ALARM_SOUNDS_FOLDER "\" this.soundDropDown.Text
         
@@ -2846,7 +2871,7 @@ class AlarmDialog {
 
     DeleteAlarm(*) {
         try {
-            if (MsgBox("Are you sure you want to delete this alarm?",, "YesNo 0x40000") = "Yes") {
+            if (MsgBox("Are you sure you want to delete this alarm?",, "YesNo 0x30 Owner" app.mainwindow.gui.Hwnd) = "Yes") {
                 ; Reset alarm properties
                 this.note.hasAlarm := false
                 this.note.alarmTime := ""
@@ -2882,7 +2907,6 @@ class AlarmDialog {
                 this.CreateGui()
             }
             if (!this.gui) {
-                LogError("GUI is null after CreateGui in AlarmDialog.Show")
                 return
             }
             this.gui.Show()
@@ -2981,8 +3005,13 @@ class MainWindow {
     noteRowMap := Map() ; Map for tracking note IDs
     filterHidden := ""  ; Checkbox control
     filterVisible := "" ; Checkbox control
+    tipsBtn := ""
+    separators := []
+    topButtons := []
+    hideWindowBtn := ""
     searchEdit := ""    ; Search box control
-    
+    botButtons := []
+
     __New() {
         this.CreateGui()
     }
@@ -2993,67 +3022,75 @@ class MainWindow {
         totalWidth := (buttonW * 3) + (spacing * 2)  ; Calculate total width for 3 columns
 
         ; Create main window
-        this.gui := Gui("+AlwaysOnTop +Resize", "Sticky Notes Manager")
+        this.gui := Gui("+AlwaysOnTop +Resize +MinSize360x375", "Sticky Notes Manager")
         this.gui.BackColor := formColor
         buttonW := 140  ; Button width
         spacing := 10   ; Space between buttons
-        helpTextFont := 11
+        TextFont := 11
 
-        this.gui.setFont("s" helpTextFont + 1 " w700")
+        if FileExist(OptionsConfig.APP_ICON) { ; Add the logo, but only if file is found
+            this.gui.Add("Picture", "x13 y7 h32 w32", OptionsConfig.APP_ICON)
+        }
+        this.gui.setFont("bold s" TextFont + 2)
         this.gui.SetFont("c" fontColor)
-        this.gui.Add("Text", " x150 y10", "Sticky Notes Manager")
-        this.gui.setFont("s" helpTextFont " w400")
-        this.gui.Add("Button", " x+85 y10 h25 w40 ", "Tips")
-            .OnEvent("Click", (*) => this.ShowTips())
-
-        ; Add separator
-        this.gui.Add("Text", "x10 y+10 w" totalWidth " h2 0x10")  ; Horizontal line
-
-        ; Create button group 1 - Core Functions
-        this.gui.Add("Button", "x10 y+10 w" buttonW " h30", "&New Note")
-            .OnEvent("Click", (*) => app.CreateNewNote())
+        this.titleText := this.gui.Add("Text", "x57 y10", "Sticky Notes Manager")
+        this.gui.setFont("norm s" TextFont)
+        this.tipsBtn := this.gui.Add("Button", "x" (totalWidth - 45) " y10 h25 w40", "Tips")
+        this.tipsBtn.OnEvent("Click", (*) => this.ShowTips())
         
-        this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "New From Clpbrd")
-            .OnEvent("Click", (*) => app.CreateClipboardNote())
-            
-        this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "&Load Notes")
-            .OnEvent("Click", (*) => app.noteManager.LoadSavedNotes())
-            
-        this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "Show Hidden")
-            .OnEvent("Click", (*) => app.noteManager.ShowHiddenNotes())
-            
-        this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "Save Status")
-            .OnEvent("Click", (*) => app.noteManager.SaveAllNotes())
-            
-        this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Exit App")
-            .OnEvent("Click", (*) => this.ExitApp())
+        ; Add separator
+        this.separators.Push(this.gui.Add("Text", "x10 y+10 w" totalWidth " h2 0x10"))  ; Horizontal line
 
-        this.gui.Add("Button", "x10 y+5 w" totalWidth " h30", "Hide This Window")
-            .OnEvent("Click", (*) => this.Hide())
-            
+        ; Top row buttons
+        tempBtn := this.gui.Add("Button", "x10 y+10 w" buttonW " h30", "&New Note")
+        tempBtn.OnEvent("Click", (*) => app.CreateNewNote())
+        this.topButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "From Clpbrd")
+        tempBtn.OnEvent("Click", (*) => app.CreateClipboardNote())
+        this.topButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Re&Load Notes")
+        tempBtn.OnEvent("Click", (*) => app.noteManager.LoadSavedNotes())
+        this.topButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "Hide App")
+        tempBtn.OnEvent("Click", (*) => this.Hide())
+        this.topButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "Save Status")
+        tempBtn.OnEvent("Click", (*) => app.noteManager.SaveAllNotes())
+        this.topButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Exit App")
+        tempBtn.OnEvent("Click", (*) => this.ExitApp())
+        this.topButtons.push(tempBtn)
+
         ; Add separator before ListView
-        this.gui.Add("Text", "x10 y+10 w" totalWidth " h2 0x10")  ; Horizontal line
+        this.separators.Push(this.gui.Add("Text", "x10 y+10 w" totalWidth " h2 0x10"))  ; Horizontal line
 
         ; Add filter controls
         this.gui.Add("Text", "x10 y+10", "Show:")
         this.filterHidden := this.gui.Add("Checkbox", "x+5 yp Checked", "Hidden")
         this.filterVisible := this.gui.Add("Checkbox", "x+10 yp Checked", "Visible")
+        this.filterDeleted := this.gui.Add("Checkbox", "x+10 yp", "Deleted")  ; Unchecked by default
         this.searchEdit := this.gui.Add("Edit", "x+10 yp-3 w240", "")
 
         ; Add filter events
         this.filterHidden.OnEvent("Click", (*) => this.PopulateNoteList())
         this.filterVisible.OnEvent("Click", (*) => this.PopulateNoteList())
+        this.filterDeleted.OnEvent("Click", (*) => this.PopulateNoteList())
         this.searchEdit.OnEvent("Change", (*) => this.PopulateNoteList())
 
         ; Create ListView with columns
         this.noteList := this.gui.Add("ListView", 
             "x10 y+5 w" totalWidth " h200 Background" listColor, 
-            ["Created", "Note Contents", "Alarm|Window"])
+            ["Created", "Delete Time|Note Contents", "Alarm|Window"])
 
         ; Set column widths
         this.noteList.ModifyCol(1, 70)
-        this.noteList.ModifyCol(2, totalWidth * 0.60) 
-        this.noteList.ModifyCol(3, totalWidth * 0.45)
+        this.noteList.ModifyCol(2, totalWidth * 0.80) 
+        this.noteList.ModifyCol(3, totalWidth * 0.35)
 
         ; Create color handler instance
         this.CLV := LV_Colors(this.noteList)
@@ -3063,34 +3100,51 @@ class MainWindow {
         this.noteList.OnEvent("ContextMenu", this.HandleClick.Bind(this))
 
         buttonY := "y+10"
-        this.gui.Add("Button", "x10 " buttonY " w" buttonW " h30", "Edit Note")
-            .OnEvent("Click", (*) => this.EditSelectedNote())
-        this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "Bring Forward")
-            .OnEvent("Click", (*) => this.ShowSelectedNote())
-        this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "&Delete Note")
-            .OnEvent("Click", (*) => this.DeleteSelectedNote())
-        this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "&Hide Note")
-            .OnEvent("Click", (*) => this.HideSelectedNote())
-        this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "&Unhide Note")
-            .OnEvent("Click", (*) => this.UnhideSelectedNote())
-        this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Open ini file")
-            .OnEvent("Click", (*) => Run(OptionsConfig.INI_FILE))
+        ; Bottom row buttons
+        tempBtn := this.gui.Add("Button", "x10 " buttonY " w" buttonW " h30", "&Edit Note")
+        tempBtn.OnEvent("Click", (*) => this.EditSelectedNote())
+        this.botButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "&Hide Note")
+        tempBtn.OnEvent("Click", (*) => this.HideSelectedNote())
+        
+        this.botButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "&Delete Note")
+        tempBtn.OnEvent("Click", (*) => this.DeleteSelectedNote())
+        this.botButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "Bring Fwd")
+        tempBtn.OnEvent("Click", (*) => this.ShowSelectedNote())
+        this.botButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "&Unhide Note")
+        tempBtn.OnEvent("Click", (*) => this.UnhideSelectedNote())
+        this.botButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Undelete")
+        tempBtn.OnEvent("Click", (*) => this.UndeleteSelectedNotes())
+        this.botButtons.push(tempBtn)
         
         ; Set up events
         this.gui.OnEvent("Close", (*) => this.Hide())
         this.gui.OnEvent("Escape", (*) => this.Hide())
+        this.gui.OnEvent("Size", (*) => this.ResizeControls())
     }
 
     ShowTips(*) {
-        helpText :=  "~~~Customizable Hotkeys~~~`n"
-            . FormatHotkeyForDisplay(OptionsConfig.NEW_NOTE) " = New Note`n"
-            . FormatHotkeyForDisplay(OptionsConfig.NEW_CLIPBOARD_NOTE) " = Clipboard Note`n"
-            . FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) " = Show/Hide Window`n"
-            . (OptionsConfig.CHECKBOX_MODIFIER_KEY? OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click = Toggle Checkbox in sticky note`n`n" : "`n")
-            . "~~~Tips for Sticky Note Manager~~~`n"
-            . "Select list item, then double-click for editor.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  Let previous disappear before viewing the next one. Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, or deleted.`n`n"
-            . "~~~Tips for Sticky Notes~~~`n"
-            . "If an alarm is playing, you can right-click the sticky note gui for a 'Stop Alarm' command.  The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area."
+        helpText :=  "`t`t~~~Customizable Hotkeys~~~`n"
+            . "`t" FormatHotkeyForDisplay(OptionsConfig.NEW_NOTE) "`t = New Note`n"
+            . "`t" FormatHotkeyForDisplay(OptionsConfig.NEW_CLIPBOARD_NOTE) "`t = Clipboard Note`n"
+            . "`t" FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) "`t = Show/Hide Window`n"
+            . "`t" (OptionsConfig.CHECKBOX_MODIFIER_KEY? OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click`t`t = Toggle Checkbox in sticky note`n`n" : "`n")
+            . "`t`t~~~Tips for Sticky Note Manager~~~`n"
+            . "Select list item, then double-click for editor.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  You must let preview disappear before viewing the next one. Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, deleted, or undeleted.  Drag edge/corner of window to change its size. When deleted notes are shown, identify them by the date and time of deletion, in note text column.`n`n"
+            . "`t`t~~~Tips for Sticky Notes~~~`n"
+            . "The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area. Notes can be 'stuck to' certain windows.  Then they will disappear until the window is active again.  New notes will cycle in terms of position, note color, and font color.  Cycling font color can be turned off.  Note editor width will try to match with of note.  Right click note for context menu of commands.  Deleted notes are purged after X days.`n`n"
+            . "`t`t~~~Tips for Alarms~~~`n"
+            . "The code expects to find a subfolder-full of .wav files in its app folder.  Choose one for the alarm sound. If an alarm is playing, you can right-click the sticky note gui for a 'Stop Alarm' command. A single-occurence alarm will delete itself after playing.  Alarms that reoccur on weekdays never self-delete.  There is a visual shake option that makes note note 'shake' when its alarm activates.  On script start, a check is done for any missed alarms, and the user is notified if any are found.`n`n"
+            . "`t`t`"We're all a little sticky on the inside...`"`n`t`t`tKunkel 2025"
         
         msgbox(helpText,"Help Tips", "Owner" this.gui.Hwnd)
         
@@ -3104,7 +3158,6 @@ class MainWindow {
     }
 
     PopulateNoteList() {
-        LogError("Starting PopulateNoteList at " A_TickCount "`n")
         this.noteList.Delete()
         this.noteRowMap.Clear()
         
@@ -3113,22 +3166,72 @@ class MainWindow {
         searchText := this.searchEdit.Text
         
         for noteData in savedNotes {
-            isHidden := Integer(noteData.isHidden)
-            if ((!this.filterHidden.Value && isHidden) || 
-                (!this.filterVisible.Value && !isHidden))
+                        isHidden := Integer(noteData.isHidden)
+            deletedTime := IniRead(OptionsConfig.INI_FILE, "Note-" noteData.id, "DeletedTime", "")
+            isDeleted := deletedTime != ""
+            
+            ; Determine if this note should be shown based on its state and filters
+            shouldShow := false
+
+            ; First check if it's a deleted note
+            if (isDeleted) {
+                ; For deleted notes, we need both:
+                ; 1. The Deleted filter must be on AND
+                ; 2. Either Hidden or Visible filter must match the note's hidden state
+                if (this.filterDeleted.Value) {
+                    if (isHidden && this.filterHidden.Value) {
+                        shouldShow := true
+                    } else if (!isHidden && this.filterVisible.Value) {
+                        shouldShow := true
+                    }
+                }
+            } else {
+                ; For non-deleted notes, just check hidden state
+                if (isHidden && this.filterHidden.Value) {
+                    shouldShow := true
+                } else if (!isHidden && this.filterVisible.Value) {
+                    shouldShow := true
+                }
+            }
+
+            ; If no filters are checked, show nothing
+            if (!this.filterHidden.Value && !this.filterVisible.Value && !this.filterDeleted.Value) {
+                shouldShow := false
+            }
+
+            if (!shouldShow) {
                 continue
+            }
+
+            ; Apply filters
+            if ((!this.filterHidden.Value && isHidden) || 
+                (!this.filterVisible.Value && !isHidden) ||
+                (!this.filterDeleted.Value && isDeleted)) {
+                continue
+            }
                 
             if (searchText && !InStr(noteData.content, searchText, true))
                 continue
-                
+
             if (RegExMatch(noteData.id, "(\d{4})(\d{2})(\d{2})", &match))
                 creationDate := SubStr(match[1], 3) "-" match[2] "-" match[3]
             else
                 creationDate := ""
                 
-            preview := StrLen(noteData.content) > 50 
-                ? SubStr(noteData.content, 1, 47) "..."
-                : noteData.content
+            ; Format the content column differently for deleted notes
+            preview := ""
+            ; Get deletion time directly from INI to ensure we catch all deleted notes
+            deletedTime := IniRead(OptionsConfig.INI_FILE, "Note-" noteData.id, "DeletedTime", "")
+            if (deletedTime != "") {
+                preview := FormatTime(deletedTime, "MM-dd HH:mm") " | " 
+                preview .= StrLen(noteData.content) > 80  ; Slightly shorter for deleted notes to make room for timestamp
+                    ? SubStr(noteData.content, 1, 77) "..."
+                    : noteData.content
+            } else {
+                preview := StrLen(noteData.content) > 100 
+                    ? SubStr(noteData.content, 1, 97) "..."
+                    : noteData.content
+            }
                 
             ; Build combined alarm/window info
             combinedInfo := ""
@@ -3157,7 +3260,6 @@ class MainWindow {
                 "0x" noteData.fontColor)
         }
 
-        LogError("PopulateNoteList completed at " A_TickCount "`n")
         ; Select the last row if any rows exist
         if (lastRow := this.noteList.GetCount()) {
             this.noteList.Modify(lastRow, "Select Focus")
@@ -3194,12 +3296,6 @@ class MainWindow {
             ToolTipOpts.SetColors(noteData.bgcolor, noteData.fontColor)
             ToolTipOpts.SetFont(noteData.fontSize, noteData.font, noteData.isBold)
             ToolTipOpts.SetMaxWidth(noteData.width + 40)
-            
-            ; Debug logging
-            LogError("Showing tooltip for note " this.noteRowMap[row] "`n"
-                . "  Font: " noteData.font " Size: " noteData.fontSize 
-                . " Bold: " noteData.isBold "`n"
-                . "  Colors - Bg: #" noteData.bgcolor " Font: #" noteData.fontColor "`n")
             
             ; Show tooltip
             ToolTip(content)
@@ -3283,7 +3379,7 @@ class MainWindow {
         } else {
             ; Multiple note deletion - always show warning regardless of setting
             if (MsgBox("Are you sure you want to delete " selectedIds.Length " notes?",
-                "Delete Multiple Notes", "YesNo 0x30 Owner" this.gui.Hwnd) = "Yes") {
+                "Delete Multiple Notes", "YesNo 0x30 Owner" this.mainwindow.gui.Hwnd) = "Yes") {
                 ; Temporarily disable list updates
                 this.gui.Opt("+Disabled")  ; Prevent user interaction during deletion
                 
@@ -3303,6 +3399,53 @@ class MainWindow {
                 
                 this.gui.Opt("-Disabled")  ; Re-enable user interaction
             }
+        }
+    }
+
+    UndeleteSelectedNotes(*) {
+        ; Get selected note IDs
+        selectedIds := this.GetSelectedNoteIds()
+        if (selectedIds.Length = 0)
+            return
+
+        ; Count how many are actually deleted
+        storage := NoteStorage()
+        deletedCount := 0
+        for noteId in selectedIds {
+            if (storage.IsNoteDeleted(noteId))
+                deletedCount++
+        }
+
+        if (deletedCount = 0) {
+            MsgBox("No deleted notes selected.", "Undelete Notes", "0x30 Owner" this.gui.Hwnd)
+            return
+        }
+
+        ; Confirm undelete
+        if (MsgBox("Undelete " deletedCount " note" (deletedCount > 1 ? "s" : "") "?",
+            "Undelete Notes", "YesNo 0x30 Owner" this.gui.Hwnd) = "Yes") {
+
+            ; Temporarily disable GUI
+            this.gui.Opt("+Disabled")
+
+            ; Process each selected note
+            for noteId in selectedIds {
+                if (storage.IsNoteDeleted(noteId)) {
+                    storage.UndeleteNote(noteId)
+                    ; Create new note if it doesn't exist
+                    if (!app.noteManager.notes.Has(noteId)) {
+                        noteData := storage.LoadNote(noteId)
+                        if (noteData) {
+                            newNote := Note(noteId, noteData)
+                            app.noteManager.notes[noteId] := newNote
+                        }
+                    }
+                }
+            }
+
+            ; Re-enable GUI and refresh
+            this.gui.Opt("-Disabled")
+            this.PopulateNoteList()
         }
     }
 
@@ -3328,10 +3471,181 @@ class MainWindow {
         this.PopulateNoteList()
     }
 
+    ShowDeletedNotes(*) {
+        try {
+            ; Get list of deleted notes
+            storage := NoteStorage()
+            deletedNotes := storage.GetDeletedNotes()
+            
+            if (deletedNotes.Length < 1) {
+                MsgBox("No deleted notes found.")
+                return false
+            }
+            
+            ; Create menu of deleted notes
+            deletedMenu := Menu()
+            
+            for noteData in deletedNotes {
+                ; Create a preview of the note content
+                preview := StrLen(noteData.content) > 40 
+                    ? SubStr(noteData.content, 1, 37) "..."
+                    : noteData.content
+                    
+                ; Get deletion date in readable format
+                readableDate := FormatTime(noteData.deletedTime, "MM-dd HH:mm")
+                
+                ; Add menu item with date
+                id := noteData.id  ; Local copy for closure
+                menuText := readableDate " | " preview
+                deletedMenu.Add(menuText, this.UndeleteNote.Bind(this, id))
+            }
+            
+            ; Show menu
+            deletedMenu.Show()
+            return true
+            
+        } catch as err {
+            MsgBox("Error showing deleted notes: " err.Message)
+            return false
+        }
+    }
+
+    UndeleteNote(id, *) {
+        try {
+            ; Get note data from storage
+            storage := NoteStorage()
+            noteData := storage.LoadNote(id)
+            if !noteData {
+                throw Error("Could not load note data")
+            }
+            
+            ; Remove deletion timestamp
+            storage.UndeleteNote(id)
+            
+            ; Create new note with saved data
+            newNote := Note(id, noteData)
+            app.noteManager.notes[id] := newNote
+            
+            ; Update listview
+            this.PopulateNoteList()
+            
+            return true
+        } catch as err {
+            MsgBox("Error undeleting note " id ": " err.Message)
+            return false
+        }
+    }
+
+    ResizeControls() {
+        try {
+            ; Get current CLIENT area width and Height
+            clientWidth := 0, clientHeight := 0
+            this.gui.GetClientPos(,,&clientWidth, &clientHeight)
+            
+            if (clientWidth < 100 || clientHeight < 300)  ; Minimum size check
+                return
+                    
+            ; Calculate dimensions based on client width
+            spacing := 10
+            fullWidth := clientWidth - 20  ; Width for full-width elements
+
+            ; Position Tips button once
+            if (this.tipsBtn) {
+                this.tipsBtn.Move(fullWidth - 31) 
+            }
+            
+            ; Calculate button width to properly fill width
+            buttonW := (fullWidth - (spacing * 2)) / 3  ; Divide available space by 3
+            buttonW := Floor(buttonW)  ; Ensure integer value
+            
+            ; Calculate ListView height based on available space
+            ; Get Y position of ListView
+            lvY := 0
+            this.noteList.GetPos(&lvX, &lvY)
+            
+            ; Reserve space for bottom buttons (assuming ~100px needed)
+            bottomButtonSpace := 100
+            
+            ; Calculate new height
+            newLVHeight := clientHeight - lvY - bottomButtonSpace
+            
+            ; Update ListView dimensions
+            this.noteList.Move(,, fullWidth, newLVHeight)
+            
+            ; Update bottom button Y positions
+            buttonY := lvY + newLVHeight + 10  ; 10px spacing after ListView
+            this.noteList.ModifyCol(1, 70)
+            this.noteList.ModifyCol(2, Integer(fullWidth * 0.80))
+            this.noteList.ModifyCol(3, Integer(fullWidth * 0.35))
+            
+            ; Update "Hide This Window" button
+            if (this.hideWindowBtn) {
+                this.hideWindowBtn.Move(10, , fullWidth)
+            }
+            
+            ; Update separator lines
+            for separator in this.separators {
+                separator.Move(,, fullWidth)
+            }
+            
+            ; Update search box width
+            if (this.searchEdit) {
+                searchX := 0, searchY := 0
+                this.searchEdit.GetPos(&searchX, &searchY)
+                this.searchEdit.Move(searchX, searchY, clientWidth - searchX - 10)
+            }
+            
+            ; Update top buttons - using only integer positions and sizes
+            if (this.topButtons.Length >= 6) {
+                ; Calculate button positions for perfect fit
+                leftX := 10
+                midX := leftX + buttonW + spacing
+                rightX := leftX + (buttonW * 2) + (spacing * 2)
+                
+                ; First row
+                this.topButtons[1].Move(leftX, , buttonW)
+                this.topButtons[2].Move(midX, , buttonW)
+                this.topButtons[3].Move(rightX, , buttonW)
+                
+                ; Second row
+                this.topButtons[4].Move(leftX, , buttonW)
+                this.topButtons[5].Move(midX, , buttonW)
+                this.topButtons[6].Move(rightX, , buttonW)
+            }
+            
+            ; Update bottom buttons
+            if (this.botButtons.Length >= 6) {
+                ; Use same positions as top buttons
+                leftX := 10
+                midX := leftX + buttonW + spacing
+                rightX := leftX + (buttonW * 2) + (spacing * 2)
+                
+                ; First row
+                this.botButtons[1].Move(leftX, buttonY, buttonW)
+                this.botButtons[2].Move(midX, buttonY, buttonW)
+                this.botButtons[3].Move(rightX, buttonY, buttonW)
+                
+                ; Second row Y position
+                buttonY += 35  ; Height of button + spacing
+                
+                ; Second row
+                this.botButtons[4].Move(leftX, buttonY, buttonW)
+                this.botButtons[5].Move(midX, buttonY, buttonW)
+                this.botButtons[6].Move(rightX, buttonY, buttonW)
+            }
+            
+        } catch Error as err {
+            LogError("Error in ResizeControls: " err.Message "`n")
+        }
+    }
+
     Show(*) {
+        ; Populate before showing
         this.PopulateNoteList()
-        ; Position window near top of screen
-        this.gui.Show("AutoSize y50")
+        
+        ; Show with explicit initial size instead of AutoSize
+        this.gui.Show("w440 h500 y50")
+        
         ; Focus the ListView by default
         this.noteList.Focus()
     }
@@ -3486,9 +3800,14 @@ Class ToolTipOpts {
     }
 }
 
-; Helper function for conditional logging
+; Helper functions for conditional logging
 LogError(message) {
     if (OptionsConfig.ERROR_LOG) {
-        FileAppend(message "`n", "error_log.txt")
+        FileAppend("ErrLog: " message "`n", "error_debug_log.txt")
+    }
+}
+Debug(message) {
+    if (OptionsConfig.DEBUG_LOG) {
+        FileAppend("Debug: " message "`n", "error_debug_log.txt")
     }
 }

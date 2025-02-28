@@ -6,7 +6,7 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    2-22-2025
+Version:    2-27-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -30,6 +30,15 @@ Features, Functionality, Usage, and Tips:
 - Multiple alarm repeats: Choose between once, 3x, or 10x alarm repetitions
 - Alarm sounds: Custom alarm sounds can be added to the Sounds folder
 - Smart alarm management: System detects and reports missed alarms on startup
+- An alarm can have a: date and/or time and/or recurrence 
+- The logic for alarms is this: 
+-- Date + time + no weekly recurrence: plays once on given date, then deletes itself
+-- Date + no time + no weekly recurrence: note appears in morning on date with no sound/shake, then alarm deletes
+-- Date + time + weekly recurrence: plays on given date, doesn't delete itself, plays again on recurring days
+-- Date + no time + weekly recurrence: note appears in morning on date, doesn't delete, reappears on recurring days
+-- No date + no time + weekly recurrence: note appears in morning on recurring weekdays
+-- No date + time + no weekly recurrence: plays at specified time
+-- No date + time + weekly recurrence: plays at specified time on recurring days
 - Main window with note management, preview, and search functionality
 - Color-coded notes: Notes maintain their color scheme in preview list
 - Rich preview: Right-click notes in manager for formatted preview with original fonts/colors
@@ -51,21 +60,20 @@ Features, Functionality, Usage, and Tips:
 - Notes auto-save position when moved
 - Turn off note deletion warning
 - Undelete notes
-- Deleted notes are purged from ini file after 7 days (Configurable)
+- Deleted notes are purged from ini file after 3 days (Configurable)
 - Checkbox Creation: Any text line starting with [] or [x] becomes an interactive checkbox
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
-- All note data saved to sticky_notes.ini in script directory
 - Hidden or deleted notes can be restored through main window or via note context menu
+- All note data saved to sticky_notes.ini in script directory
 - Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
 - Use manual "Save Status" after significant changes
 - "Load/Reload Notes" refreshes all notes from storage
 - System tray icon provides quick access to common functions
 - Start with Windows: Option available in tray menu
 
-Known Issues:
--------------
-- In note listview, when previewing, must let preview time-out before previewing another
-- In note listview, if notes are sorted, colors will not sort with them
+Known Issue:
+------------
+- In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled. 
 
 Development Note:
 -----------------
@@ -83,7 +91,7 @@ Justme for his ToolTipOptions and LV_Colors classes.
 ; Hotkeys and other Configuration.  Change if desired.
 class OptionsConfig {
     static DEBUG_LOG             := 0      ; Mostly for AI feedback.  Recommend setting 'false.'      
-    static ERROR_LOG             := 0      ; Mostly for AI feedback.  Recommend setting 'false.'      
+    static ERROR_LOG             := 1      ; Mostly for AI feedback.  Recommend setting 'false.'      
     static TOGGLE_MAIN_WINDOW    := "+#s"  ; Shift+Win+S. Shows/Hide Note Manager window.
     static NEW_NOTE              := "+#n"  ; Shift+Win+N. New note.
     static NEW_CLIPBOARD_NOTE    := "+#c"  ; Shift+Win+C. New note from text on clipboard.
@@ -96,6 +104,7 @@ class OptionsConfig {
     static DEFAULT_BORDER        := true   ; Whether new notes have borders by default.
     static CYCLE_FONT_COLOR      := true   ; Should new notes have colored font by default? False = black.
     static WARN_ON_DELETE_NOTE   := true   ; Whether to show confirmation before deleting notes (except multiple deletion).
+    static DISABLE_TABLE_SORT    := true   ; When sorting note table in note manager, colors won't sort, so disabled.
     ; Visual shake for alarms settings.
     static DEFAULT_ALARM_SHAKE   := true    ; Whether new notes have borders by default.
     static SHAKE_STEPS           := 40      ; Number of shakes (40 takes about 3 seconds, depending on computer).
@@ -106,10 +115,11 @@ class OptionsConfig {
     static DRAG_AREA_OFFSET      := 25      ; Y-offset of note text when reserving drag area.
     static NO_RESERVE_OFFSET     := 5       ; Y-offset when not reserving drag area.
     static NO_RESERVE_X_OFFSET   := 25      ; X-offset for drag area when not reserving space (makes room to click checkboxes).
-    ; Winodws hidden from 'Select Window for Sticking' listbox.
-    static BLACKLISTED_WINDOWS  := ["Sticky Notes", "Edit Note", "Set Alarm", "Select Window", "Rainmeter"]
-    static DAYS_DELETED_KEPT := 7    ; Number of days to keep deleted notes
-    static DEFAULT_SHOW_DELETED := false  ; Whether to show deleted notes in listview by default
+    ; Winodws hidden from 'Select Window for Sticking' listbox... I never want to stick a note to these. 
+    static BLACKLISTED_WINDOWS  := ["Sticky Notes", "Edit Note", "Set Alarm", "Select Window", "Rainmeter"] 
+    ; Undelete settings.
+    static DAYS_DELETED_KEPT := 3           ; Number of days to keep deleted notes before purging.
+    static DEFAULT_SHOW_DELETED := false    ; Whether to show deleted notes in listview by default.
 }
 
 ; Global Constants
@@ -237,7 +247,7 @@ class StickyNotes {
             this.mainWindow.Hide()
         } else {
             this.mainWindow.Show()
-            app.mainWindow.PopulateNoteList()
+            this.mainWindow.PopulateNoteList()
         }
     }
     
@@ -379,6 +389,7 @@ class StickyNotes {
         
         currentTime := FormatTime(, "h:mm tt")
         currentDay := FormatTime(, "ddd")
+        currentDate := FormatTime(, "yyyyMMdd")
         
         ; Convert current day to short format
         dayMap := Map(
@@ -391,6 +402,9 @@ class StickyNotes {
             "Sat", "Sa"
         )
         shortDay := dayMap[currentDay]
+        
+        ; Check for morning time (for dateless alarms)
+        isMorningTime := (A_Hour >= 8 && A_Hour < 9)  ; Define "morning" as 8-9 AM
         
         ; First collect notes with active alarms
         activeAlarms := []
@@ -424,21 +438,46 @@ class StickyNotes {
         for alarmNote in activeAlarms {
             id := alarmNote.id
             note := alarmNote.note
-                
-            if (currentTime != note.alarmTime)
-                continue
-                
-            ; For notes with weekday settings
-            if (note.alarmDays) {
-                if (!InStr(note.alarmDays, shortDay))
-                    continue
-            }
             
-            ; Check if we've already handled this alarm
+            ; Check if we've already handled this alarm cycle
             if (this.cycleComplete.Has(id) && this.cycleComplete[id]) {
                 continue
             }
-                        
+            
+            ; Check date-based alarms
+            if (note.alarmDate) {
+                ; Skip if not the right date
+                if (note.alarmDate != currentDate) {
+                    continue
+                }
+                
+                ; For date & time alarms, check the time
+                if (note.hasAlarmTime) {
+                    if (currentTime != note.alarmTime) {
+                        continue
+                    }
+                } 
+                ; For date & no-time alarms, check if it's morning time
+                else if (!isMorningTime) {
+                    continue
+                }
+            } 
+            ; For time-only alarms (no date), check the time
+            else if (note.hasAlarmTime) {
+                if (currentTime != note.alarmTime) {
+                    continue
+                }
+            }
+            ; For no-date and no-time alarms, check if it's morning time and the right day
+            else if (!isMorningTime || (note.alarmDays && !InStr(note.alarmDays, shortDay))) {
+                continue
+            }
+            
+            ; For notes with weekday settings, check the day
+            if (note.alarmDays && !InStr(note.alarmDays, shortDay)) {
+                continue
+            }
+            
             ; Initialize play count for this note if needed
             if (!this.playCount.Has(id)) {
                 this.playCount[id] := 0
@@ -447,9 +486,36 @@ class StickyNotes {
             
             ; Check if enough time has passed since last play
             if (A_Now - this.lastPlayTime[id] >= 0.1) {
-                ("Current play count: " (this.playCount.Has(id) ? this.playCount[id] : 0) " of " note.alarmRepeatCount "`n")
+                Debug("Current play count: " (this.playCount.Has(id) ? this.playCount[id] : 0) " of " note.alarmRepeatCount)
                 
-                ; Trigger the alarm if we haven't reached the repeat count
+                ; For no-time alarms, just show the note
+                if (!note.hasAlarmTime) {
+                    note.Show()
+                    this.cycleComplete[id] := true
+                    
+                    ; If it's a one-time alarm without recurrence, remove it
+                    if (!note.alarmDays) {
+                        note.hasAlarm := false
+                        note.alarmDate := ""
+                        
+                        ; Update button text if editor is open
+                        if (note.editor) {
+                            note.editor.addAlarmBtn.Text := "Add &Alarm..."
+                        }
+                        
+                        storage := NoteStorage()
+                        storage.SaveNote(note)
+                    }
+                    
+                    ; Update last play date
+                    note.lastPlayDate := FormatTime(A_Now, "yyyyMMdd")
+                    storage := NoteStorage()
+                    storage.SaveNote(note)
+                    
+                    continue
+                }
+                
+                ; For time-based alarms, handle sound and visual effects
                 if (!this.playCount.Has(id) || this.playCount[id] < note.alarmRepeatCount) {
                     ; Trigger the alarm
                     note.HandleAlarm()
@@ -466,24 +532,24 @@ class StickyNotes {
                 
                 ; Check if we've finished all repeats
                 if (this.playCount.Has(id) && this.playCount[id] >= note.alarmRepeatCount) {
-                        
                     this.cycleComplete[id] := true
                     
-                ; If it's a one-time alarm, remove it
-                if (!note.alarmDays) {
-                    note.hasAlarm := false
-                    note.alarmTime := ""
-                    note.alarmSound := ""
-                    note.alarmRepeatCount := 1
-                    
-                    ; Update button text if editor is open
-                    if (note.editor) {
-                        note.editor.addAlarmBtn.Text := "Add &Alarm..."
+                    ; If it's a one-time alarm without recurrence, remove it
+                    if (!note.alarmDays) {
+                        note.hasAlarm := false
+                        note.alarmDate := ""
+                        note.alarmTime := ""
+                        note.alarmSound := ""
+                        note.alarmRepeatCount := 1
+                        
+                        ; Update button text if editor is open
+                        if (note.editor) {
+                            note.editor.addAlarmBtn.Text := "Add &Alarm..."
+                        }
+                        
+                        storage := NoteStorage()
+                        storage.SaveNote(note)
                     }
-                    
-                    storage := NoteStorage()
-                    storage.SaveNote(note)
-                }
                     
                     ; Clean up tracking maps
                     this.playCount.Delete(id)
@@ -506,7 +572,7 @@ class StickyNotes {
         for id, note in this.noteManager.notes {
             if (note.hasAlarm) {
                 notesWithAlarms.Push({id: id, note: note})
-                LogError("Found note " id " with alarm set for " note.alarmTime "`n")
+                LogError("Found note " id " with alarm set for " note.alarmTime)
             }
         }
 
@@ -599,7 +665,7 @@ class StickyNotes {
                     isCurrentlyVisible := WinExist("ahk_id " note.gui.Hwnd) ? true : false
                 }
             } catch Error as err {
-                LogError("Error checking note " id " visibility: " err.Message "`n")
+                LogError("Error checking note " id " visibility: " err.Message)
                 isCurrentlyVisible := false
             }
             
@@ -770,7 +836,7 @@ class BorderGui {
             this.Child.Show(Format("x{} y{}", absoluteX, absoluteY))
             this.Child := ""
         } catch as err {
-            LogError("Error in BorderGui.Release: " err.Message "`n")
+            LogError("Error in BorderGui.Release: " err.Message)
         }
     }
 
@@ -801,11 +867,13 @@ class Note {
 
     ; alarm-related properties
     hasAlarm := false
+    alarmDate := ""
+    hasAlarmTime := true 
     alarmTime := ""
     alarmSound := ""
     alarmDays := ""
     alarmRepeatCount := 1
-    visualShake := true  
+    visualShake := true 
     lastPlayDate := ""
 
     ; window-stick properties
@@ -824,6 +892,7 @@ class Note {
         this.fontColor := options.fontColor
         this.isOnTop := options.isOnTop
         this.width := options.HasOwnProp("width") ? options.width : StickyNotesConfig.DEFAULT_WIDTH
+        this.isBeingDeleted := false  ; Add this line to initialize the flag
 
         ; Initialize alarm properties
         this.hasAlarm := options.HasOwnProp("hasAlarm") ? options.hasAlarm : false
@@ -831,6 +900,8 @@ class Note {
         this.alarmSound := options.HasOwnProp("alarmSound") ? options.alarmSound : ""
         this.alarmDays := options.HasOwnProp("alarmDays") ? options.alarmDays : ""
         this.alarmRepeatCount := options.HasOwnProp("alarmRepeatCount") ? options.alarmRepeatCount : 1
+        this.alarmDate := options.HasOwnProp("alarmDate") ? options.alarmDate : ""
+        this.hasAlarmTime := options.HasOwnProp("hasAlarmTime") ? options.hasAlarmTime : true
         this.lastPlayDate := options.HasOwnProp("lastPlayDate") ? options.lastPlayDate : ""
 
         ; Initialize window-sticking properties
@@ -1035,12 +1106,17 @@ class Note {
     WM_ACTIVATE(wParam, lParam, msg, hwnd) {
         try {
             ; First verify we have a valid GUI
-            if (!this.gui || !IsObject(this.gui)) {
+            if (!this.gui || !IsObject(this.gui) || !this.gui.HasProp("Hwnd")) {
                 return
             }
             
             ; Then check if it's our window losing focus
             if (hwnd = this.gui.Hwnd && wParam = 0) {
+                ; Skip the entire handler if we're in the process of being deleted
+                if (this.isBeingDeleted) {
+                    return
+                }
+                
                 ; Get the correct position to save
                 x := 0
                 y := 0
@@ -1059,11 +1135,14 @@ class Note {
                     this.currentY := y
                     storage.SaveNote(this)
                 } else {
-                    LogError("Note " this.id " no longer exists - skipping position save`n")
+                    ; Instead of logging an error, set a flag that this note is no longer tracked
+                    ; This avoids repeated error logs for the same note
+                    this.isBeingDeleted := true
+                    Debug("Note " this.id " not found in storage - flagged as being deleted")
                 }
             }
         } catch as err {
-            LogError("Error in WM_ACTIVATE: " err.Message "`n")
+            LogError("Error in WM_ACTIVATE: " err.Message)
         }
     }
 
@@ -1121,8 +1200,10 @@ class Note {
         noteMenu.Show()
     }
     
-        StopSound(*) {
+    StopSound(*) {
+        ; Always try to stop any playing sound, regardless of tracking flag
         try SoundPlay("nonexistent.wav")
+        this.currentlyPlaying := false
     }
 
     SaveCheckboxState(ctrl, *) {
@@ -1179,6 +1260,10 @@ class Note {
         ; Create editor if it doesn't exist
         if (!this.editor) {
             this.editor := NoteEditor(this)
+        } else {
+            ; Recreate editor if it exists to ensure current width is used
+            this.editor.Destroy()
+            this.editor := NoteEditor(this)
         }
         
         ; Show editor
@@ -1192,20 +1277,22 @@ class Note {
         ; Show the note if it's hidden
         this.Show()
         
-        ; Trigger shake effect if enabled
-        if (this.visualShake)
-            this.ShakeNote()
-        
-        ; Play the alarm sound if specified
-        if (this.alarmSound && FileExist(this.alarmSound))
-            SoundPlay(this.alarmSound, 1)
+        ; Only trigger sound and shake for time-based alarms
+        if (this.hasAlarmTime) {
+            ; Trigger shake effect if enabled
+            if (this.visualShake)
+                this.ShakeNote()
+            
+            ; Play the alarm sound if specified
+            if (this.alarmSound && FileExist(this.alarmSound))
+                SoundPlay(this.alarmSound, 1)
+        }
 
         ; Update lastPlayDate
         this.lastPlayDate := FormatTime(A_Now, "yyyyMMdd")
         ; Save to storage immediately
         storage := NoteStorage()
         storage.SaveNote(this)
-
     }
 
     DeleteAlarm(*) {
@@ -1231,7 +1318,7 @@ class Note {
                     this.editor.addAlarmBtn.Text := "Add &Alarm..."
                 }
             } catch Error as err {
-                LogError("Error in Note.DeleteAlarm: " err.Message "`n")
+                LogError("Error in Note.DeleteAlarm: " err.Message)
             }
         }
     }
@@ -1289,7 +1376,7 @@ class Note {
             }
             
         } catch as err {
-            LogError("Error in PerformShake: " err.Message "`n")
+            LogError("Error in PerformShake: " err.Message)
             SetTimer(, 0)  ; Stop timer on error
             return
         }
@@ -1416,6 +1503,9 @@ class Note {
         if (!OptionsConfig.WARN_ON_DELETE_NOTE || 
             MsgBox("Are you sure you want to delete this note?",, "0x30 YesNo Owner" app.mainwindow.gui.Hwnd) = "Yes") {
             try {
+                ; Set flag to prevent WM_ACTIVATE from trying to save this note
+                this.isBeingDeleted := true
+                
                 ; Clean up alarm state if it exists
                 if (this.hasAlarm && StickyNotes.cycleComplete && StickyNotes.cycleComplete.Has(this.id)) {
                     StickyNotes.cycleComplete.Delete(this.id)
@@ -1430,7 +1520,7 @@ class Note {
                 ; Use the app's noteManager to delete this note
                 app.noteManager.DeleteNote(this.id)
             } catch Error as err {
-                LogError("Error in Note.Delete: " err.Message "`n")
+                LogError("Error in Note.Delete: " err.Message)
             }
         }
     }
@@ -1694,12 +1784,12 @@ class NoteManager {
                     this.storage.SaveNote(note)
                     
                 } catch as err {
-                    LogError("Error saving note " id ": " err.Message "`n")
+                    LogError("Error saving note " id ": " err.Message)
                 }
             }
             return true
         } catch as err {
-                LogError("Error in SaveAllNotes: " err.Message "`n")
+                LogError("Error in SaveAllNotes: " err.Message)
             return false
         }
     }
@@ -1744,7 +1834,7 @@ class NoteManager {
                         }
                     }
                 } catch as err {
-                    LogError("Error creating note " noteData.id ": " err.Message "`n")
+                    LogError("Error creating note " noteData.id ": " err.Message)
                     continue
                 }
             }
@@ -1779,7 +1869,7 @@ class NoteManager {
 
             return true
         } catch as err {
-            LogError("Error in DeleteNote for id " id ": " err.Message "`n")
+            LogError("Error in DeleteNote for id " id ": " err.Message)
             MsgBox("Error deleting note " id ": " err.Message)
             return false
         }
@@ -1914,15 +2004,26 @@ class NoteStorage {
             IniWrite(note.width, OptionsConfig.INI_FILE, sectionName, "Width")
             IniWrite(note.hasBorder, OptionsConfig.INI_FILE, sectionName, "HasBorder")
 
+            ; Save alarm properties
             IniWrite(note.hasAlarm, OptionsConfig.INI_FILE, sectionName, "HasAlarm")
+            
+            ; Save new alarm properties
             if (note.hasAlarm) {
+                ; Save date (even if empty)
+                IniWrite(note.alarmDate ? note.alarmDate : "", OptionsConfig.INI_FILE, sectionName, "AlarmDate")
+                
+                ; Save hasAlarmTime flag (default to true if not set)
+                hasAlarmTime := note.HasOwnProp("hasAlarmTime") ? note.hasAlarmTime : true
+                IniWrite(hasAlarmTime, OptionsConfig.INI_FILE, sectionName, "HasAlarmTime")
+                
+                ; Save existing alarm properties
                 IniWrite(note.alarmTime, OptionsConfig.INI_FILE, sectionName, "AlarmTime")
                 IniWrite(note.alarmSound, OptionsConfig.INI_FILE, sectionName, "AlarmSound")
                 IniWrite(note.alarmDays, OptionsConfig.INI_FILE, sectionName, "AlarmDays")
                 IniWrite(note.alarmRepeatCount, OptionsConfig.INI_FILE, sectionName, "AlarmRepeatCount")
                 IniWrite(note.visualShake, OptionsConfig.INI_FILE, sectionName, "VisualShake")
                 IniWrite(note.lastPlayDate, OptionsConfig.INI_FILE, sectionName, "LastPlayDate")
-            } 
+            }
 
             ; Save window sticking info
             IniWrite(note.isStuckToWindow ? 1 : 0, OptionsConfig.INI_FILE, sectionName, "IsStuckToWindow")
@@ -1936,11 +2037,12 @@ class NoteStorage {
                 IniWrite(note.deletedTime, OptionsConfig.INI_FILE, sectionName, "DeletedTime")
                 
             return true
-        } catch as err {  ; <- This was also missing its closing brace
+        } catch as err {
             MsgBox("Error saving note to INI: " err.Message)
             return false
         }
     }
+
     PurgeOldDeletedNotes() {
         try {
             sections := IniRead(OptionsConfig.INI_FILE)
@@ -1961,7 +2063,7 @@ class NoteStorage {
                 }
             }
         } catch Error as err {
-            LogError("Error in PurgeOldDeletedNotes: " err.Message "`n")
+            LogError("Error in PurgeOldDeletedNotes: " err.Message)
         }
     }
 
@@ -1991,7 +2093,7 @@ class NoteStorage {
 
             return deletedNotes
         } catch Error as err {
-            LogError("Error in GetDeletedNotes: " err.Message "`n")
+            LogError("Error in GetDeletedNotes: " err.Message)
             return []
         }
     }
@@ -2015,7 +2117,7 @@ class NoteStorage {
 
             return true
         } catch Error as err {
-            LogError("Error in UndeleteNote: " err.Message "`n")
+            LogError("Error in UndeleteNote: " err.Message)
             return false
         }
     }
@@ -2057,7 +2159,9 @@ class NoteStorage {
                 isHidden: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "Hidden", "0")),
                 hasBorder: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "HasBorder", OptionsConfig.DEFAULT_BORDER)),
                 hasAlarm: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "HasAlarm", "0")),
+                hasAlarmTime: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "HasAlarmTime", "1")),  ; Default to true for backward compatibility
                 alarmTime: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmTime", ""),
+                alarmDate: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmDate", ""),
                 alarmSound: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmSound", ""),
                 alarmDays: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmDays", ""),
                 alarmRepeatCount: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmRepeatCount", "1")),
@@ -2070,7 +2174,7 @@ class NoteStorage {
 
             return noteData
         } catch as err {
-            LogError("LoadNote: Error loading note " id ": " err.Message "`n")
+            LogError("LoadNote: Error loading note " id ": " err.Message)
             return false
         }
     }
@@ -2122,7 +2226,7 @@ class NoteStorage {
             return notes
             
         } catch as err {
-            LogError("Error in LoadAllNotes: " err.Message "`n")
+            LogError("Error in LoadAllNotes: " err.Message)
             NoteStorage.isLoading := false
             return []
         }
@@ -2221,7 +2325,7 @@ class NoteStorage {
             return true
             
         } catch Error as err {
-            LogError("Error in NoteStorage.DeleteNote for id " id ": " err.Message "`n")
+            LogError("Error in NoteStorage.DeleteNote for id " id ": " err.Message)
             return false
         }
     }
@@ -2252,16 +2356,22 @@ class NoteEditor {
     }
     
     CreateGui() {
-        editorWidth := Max(this.note.width, 200)  ; Use note width but minimum of 200
+        ; Make the editor wider than the note to account for margins and scrollbar
+        editorWidth := Max(this.note.width, 200) + 48 
+        this.editorWidth := editorWidth  ; Store for reference
         
         ; Create editor window - don't set window background color
         this.gui := Gui("+AlwaysOnTop", "Edit Note " this.note.id)
         this.gui.BackColor := formColor
-        this.gui.SetFont("c" fontColor)  ; Set default text color for all controls
+        this.gui.SetFont("s11 bold c" fontColor)  ; Set default text color for all controls
+
+        ; Make title at top of dialog
+        this.gui.Add("Text", "y2 center w" editorWidth-25, "Sticky Note Editor")
+        this.gui.SetFont("s9 Norm")
 
         ; Create edit control with matching background color and correct bold state
         this.editControl := this.gui.Add("Edit",
-        "x5 y5 w" (editorWidth - 10) " h200 +Multi +WantReturn Background" this.note.bgcolor,
+        "x10 y+2 w" (editorWidth - 20) " h200 +Multi +WantReturn +WantTab Background" this.note.bgcolor,
         this.note.content)
             
         ; Set font properties including bold state
@@ -2283,42 +2393,45 @@ class NoteEditor {
     }
 
     AddFormattingControls() {
-        editorWidth := Max(this.note.width, 200)  ; Use note width but minimum of 200
-        ; Create format group below the edit control
-        this.gui.Add("GroupBox", 
-            "x5 y215 w" (editorWidth - 10) " h125 Background" formColor,
-            "Formatting")
+        editorWidth := Max(this.note.width, 200) + 48   ; Use note width but minimum of 200
+    ; Create format group with balanced margins
+    this.gui.Add("GroupBox", 
+        "x10 y+10 w" (editorWidth - 20) " h125 Background" formColor,
+        "Formatting")
 
-
-        ; Background color dropdown
-        this.gui.Add("Text", "xp+10 yp+20", "Background:")
-        colorDropdown := this.gui.Add("DropDownList", "x+5 yp-3 w100", this.GetColorList())
-        colorDropdown.Text := this.GetColorName(this.note.bgcolor)
-        colorDropdown.OnEvent("Change", (*) => this.UpdateBackgroundColor(colorDropdown.Text))
+        ; Background color dropdown - store reference as class property
+        this.gui.Add("Text", "x24 yp+20", "Background:")
+        this.bgColorDropdown := this.gui.Add("DropDownList", "x+10 yp-3 w100", this.GetColorList())
+        this.bgColorDropdown.Text := this.GetColorName(this.note.bgcolor)
+        this.bgColorDropdown.OnEvent("Change", (*) => this.UpdateBackgroundColor(this.bgColorDropdown.Text))
         
-        ; Font dropdown - full width
-        this.gui.Add("Text", "x15 y+10", "Font:")
-        fontDropdown := this.gui.Add("DropDownList", "x+5 yp-3 w" ((editorWidth - 10) - 50),
+        ; Font dropdown
+        this.gui.Add("Text", "x24 y+10", "Font:")
+        fontDropdown := this.gui.Add("DropDownList", "x+10 yp-3 w" ((editorWidth - 10) - 130),
             ["Arial", "Times New Roman", "Verdana", "Courier New", "Comic Sans MS", "Calibri", "Segoe UI", "Georgia", "Tahoma"])
         fontDropdown.Text := this.note.font
         fontDropdown.OnEvent("Change", (*) => this.UpdateFont(fontDropdown.Text))
         
-        ; Font size and bold controls on same line
-        this.gui.Add("Text", "x15 y+10", "Size:")
-        sizeDropdown := this.gui.Add("DropDownList", "x+5 yp-3 w60", StickyNotesConfig.FONT_SIZES)
-        sizeDropdown.Text := this.note.fontSize
-        sizeDropdown.OnEvent("Change", (*) => this.UpdateFontSize(sizeDropdown.Text))
-        
         ; Add Bold checkbox next to size
-        boldCB := this.gui.Add("Checkbox", "x+15 yp+3", "Bold")
+        boldCB := this.gui.Add("Checkbox", "x+10 yp+3", "Bold")
         boldCB.Value := this.note.isBold
         boldCB.OnEvent("Click", (*) => this.UpdateBold(boldCB.Value))
         
-        ; Font color dropdown
-        this.gui.Add("Text", "x15 y+14", "Font:")
-        fontColorDropdown := this.gui.Add("DropDownList", "x+5 yp-3 w80", this.GetFontColorList())
-        fontColorDropdown.Text := this.GetFontColorName(this.note.fontColor)
-        fontColorDropdown.OnEvent("Change", (*) => this.UpdateFontColor(fontColorDropdown.Text))
+        ; Font size 
+        this.gui.Add("Text", "x24 y+10", "Size:")
+        sizeDropdown := this.gui.Add("DropDownList", "x+10 yp-3 w60", StickyNotesConfig.FONT_SIZES)
+        sizeDropdown.Text := this.note.fontSize
+        sizeDropdown.OnEvent("Change", (*) => this.UpdateFontSize(sizeDropdown.Text))
+        
+        ; Font color dropdown - store reference as class property
+        this.gui.Add("Text", "x24 y+8", "Font:")
+        this.fontColorDropdown := this.gui.Add("DropDownList", "x+10 yp-3 w80", this.GetFontColorList())
+        this.fontColorDropdown.Text := this.GetFontColorName(this.note.fontColor)
+        this.fontColorDropdown.OnEvent("Change", (*) => this.UpdateFontColor(this.fontColorDropdown.Text))
+
+        ; Add Random button
+        randomBtn := this.gui.Add("Button", "x+10 yp w50 h20", "Random")
+        randomBtn.OnEvent("Click", this.ApplyRandomColors.Bind(this))
     }
 
     UpdateBold(isBold) {
@@ -2382,24 +2495,84 @@ class NoteEditor {
     }
     
     UpdateFontColor(colorName) {
-        if (colorCode := StickyNotesConfig.FONT_COLORS[colorName]) {
-            this.note.fontColor := colorCode
-            this.editControl.SetFont("c" colorCode)
+        try {
+            if (StickyNotesConfig.FONT_COLORS.Has(colorName)) {
+                colorCode := StickyNotesConfig.FONT_COLORS[colorName]
+                Debug("UpdateFontColor: Setting color to " colorName " (" colorCode ")")
+                this.note.fontColor := colorCode
+                this.editControl.SetFont("c" colorCode)
+            } else {
+                LogError("Font color name not found: " colorName)
+            }
+        } catch Error as err {
+            LogError("Error updating font color: " err.Message)
         }
     }
 
+    ApplyRandomColors(*) {
+        ; Get random background color
+        bgColorKeys := []
+        for name, _ in StickyNotesConfig.COLORS
+            bgColorKeys.Push(name)
+        
+        randomBgIndex := Random(1, bgColorKeys.Length)
+        randomBgColorName := bgColorKeys[randomBgIndex]
+        randomBgColor := StickyNotesConfig.COLORS[randomBgColorName]
+        
+        ; Get random font color
+        fontColorKeys := []
+        for name, _ in StickyNotesConfig.FONT_COLORS
+            fontColorKeys.Push(name)
+        
+        randomFontIndex := Random(1, fontColorKeys.Length)
+        randomFontColorName := fontColorKeys[randomFontIndex]
+        randomFontColor := StickyNotesConfig.FONT_COLORS[randomFontColorName]
+        
+        ; Update the edit control's background color
+        this.note.bgcolor := randomBgColor
+        this.editControl.Opt("Background" randomBgColor)
+        
+        ; Update the edit control's font color
+        this.note.fontColor := randomFontColor
+        this.editControl.SetFont("c" randomFontColor)
+        
+        ; Update the dropdown selections to match the new colors
+        this.bgColorDropdown.Text := randomBgColorName
+        this.fontColorDropdown.Text := randomFontColorName
+        
+        ; Refresh the controls to show the new colors
+        this.editControl.Redraw()
+    }
+
     AddActionButtons() {
-        editorWidth := Max(this.note.width, 200)  ; Use note width but minimum of 200
+        editorWidth := Max(this.note.width, 200) + 48   ; Use note width but minimum of 200
         ; Add Note Options group
         this.gui.Add("GroupBox", 
-            "x5 y+15 w" (editorWidth - 10) " h123",  ; Made taller for both controls
+            "x10 y+25 w" (editorWidth - 20) " h123",  ; Made taller for both controls
             "Note Options")
 
         ; Add alarm button
-        addAlarmBtnText := this.note.hasAlarm 
-            ? this.note.alarmTime  (this.note.alarmDays ?  "-" this.note.alarmDays : "") : "Add &Alarm..."
-        this.addAlarmBtn := this.gui.Add("Button", "xp+6 yp+16 w" (editorWidth - 25), addAlarmBtnText)
-        this.addAlarmBtn.OnEvent("Click", this.ShowAlarmDialog.Bind(this))
+        addAlarmBtnText := "Add &Alarm..."
+            if (this.note.hasAlarm) {
+                addAlarmBtnText := ""
+                ; Add date if present
+                if (this.note.alarmDate)
+                    addAlarmBtnText .= FormatTime(this.note.alarmDate, "MMM-dd")
+                    
+                ; Add time if present
+                if (this.note.alarmTime) {
+                    ; Add space if we already have date
+                    if (this.note.alarmDate)
+                        addAlarmBtnText .= " "
+                    addAlarmBtnText .= this.note.alarmTime
+                }
+                
+                ; Add weekday recurrence information
+                if (this.note.alarmDays)
+                    addAlarmBtnText .= " -" this.note.alarmDays
+            }
+            this.addAlarmBtn := this.gui.Add("Button", "x24 yp+16 w" (editorWidth - 50), addAlarmBtnText)
+            this.addAlarmBtn.OnEvent("Click", this.ShowAlarmDialog.Bind(this))
 
         ; stick to window button
         stickBtnText := "Stick to &Window..."
@@ -2410,7 +2583,7 @@ class NoteEditor {
                 : this.note.stuckWindowTitle
         }
 
-        this.stickToWindowBtn := this.gui.Add("Button", "xp y+5 w" (editorWidth - 25), stickBtnText)
+        this.stickToWindowBtn := this.gui.Add("Button", "x24 y+5 w" (editorWidth - 50), stickBtnText)
         this.stickToWindowBtn.OnEvent("Click", this.ShowWindowStickyDialog.Bind(this))
 
         ; Add Width control with UpDown
@@ -2432,13 +2605,13 @@ class NoteEditor {
         borderCB.OnEvent("Click", (*) => this.UpdateBorder(borderCB.Value))
 
         
-        this.gui.Add("Button", "x5 y+15 w60", "&Save")
+        this.gui.Add("Button", "x10 y+15 w70", "&Save")
             .OnEvent("Click", (*) => this.Save())
 
-        this.gui.Add("Button", "x+5 w60", "&Delete")
+        this.gui.Add("Button", "x+8 w70", "&Delete")
             .OnEvent("Click", this.DeleteNote.Bind(this))
 
-        this.gui.Add("Button", "x+5 w60", "&Cancel")
+        this.gui.Add("Button", "x+8 w70", "&Cancel")
             .OnEvent("Click", (*) => this.Hide())
     }
 
@@ -2504,7 +2677,7 @@ class NoteEditor {
                     }
                 } catch Error as err {
                     ; Safely handle any regex or comparison errors
-                    LogError("Window filtering error: " err.Message "`n")
+                    LogError("Window filtering error: " err.Message)
                 }
             }
             
@@ -2579,31 +2752,55 @@ class NoteEditor {
     }
     
     Save(*) {
-        ; Get current content
-        newContent := this.editControl.Text
-        
-        ; Update note with properties
-        this.note.UpdateContent(newContent, {
-            bgcolor: this.note.bgcolor,
-            font: this.note.font,
-            fontSize: this.note.fontSize,
-            isBold: this.note.isBold,
-            fontColor: this.note.fontColor,
-            isOnTop: this.note.isOnTop,  
-            width: this.widthEdit.Value,
-            hasBorder: this.note.hasBorder,
-            hasAlarm: this.note.hasAlarm,
-            alarmTime: this.note.alarmTime,
-            alarmSound: this.note.alarmSound,
-            alarmDays: this.note.alarmDays,
-            alarmRepeatCount: this.note.alarmRepeatCount
-        })
+        try {
+            ; Get current content
+            newContent := this.editControl.Text
+            
+            ; Store current note position
+            x := 0, y := 0
+            if (this.note.borderGui && this.note.borderGui.Gui1) {
+                this.note.borderGui.Gui1.GetPos(&x, &y)
+            } else {
+                this.note.gui.GetPos(&x, &y)
+            }
+            
+            ; Store new width value
+            newWidth := this.widthEdit.Value
+            
+            ; Update note with properties
+            this.note.UpdateContent(newContent, {
+                bgcolor: this.note.bgcolor,
+                font: this.note.font,
+                fontSize: this.note.fontSize,
+                isBold: this.note.isBold,
+                fontColor: this.note.fontColor,
+                isOnTop: this.note.isOnTop,  
+                width: newWidth,
+                hasBorder: this.note.hasBorder,
+                hasAlarm: this.note.hasAlarm,
+                alarmTime: this.note.alarmTime,
+                alarmSound: this.note.alarmSound,
+                alarmDays: this.note.alarmDays,
+                alarmRepeatCount: this.note.alarmRepeatCount
+            })
 
-        ; Save to storage
-        (NoteStorage()).SaveNote(this.note)
-        
-        this.gui.Destroy()
-        this.CreateGui()
+            ; Save to storage
+            (NoteStorage()).SaveNote(this.note)
+            
+            ; Update main window ListView if it's visible
+            if WinExist("ahk_id " app.mainWindow.gui.Hwnd) {
+                app.mainWindow.PopulateNoteList()
+            }
+            
+            ; Destroy and recreate the editor with the new width if reopened
+            this.note.editor := ""
+            this.gui.Destroy()
+            
+            ; Hide editor 
+            this.Hide()
+        } catch Error as err {
+            LogError("Error in NoteEditor.Save: " err.Message)
+        }
     }
 
     DeleteNote(*) {
@@ -2668,8 +2865,18 @@ class AlarmDialog {
         this.gui.BackColor := formColor
         this.gui.SetFont("c" fontColor)
 
-        ; Time inputs
-        this.gui.AddText("y10", "Time: ")
+        ; Add date picker button
+        this.gui.AddText("y10", "Date: ")
+        this.dateBtn := this.gui.AddButton("x+5 yp-3 w120", "No date picked")
+        this.dateBtn.OnEvent("Click", this.ShowDatePicker.Bind(this))
+        
+        ; Store selected date
+        this.selectedDate := ""
+
+        ; Time inputs with checkbox
+        this.timeCheck := this.gui.AddCheckbox("xm y+10 Checked", "Time: ")
+        this.timeCheck.OnEvent("Click", this.ToggleTimeControls.Bind(this))
+        
         this.hourEdit := this.gui.AddEdit("x+5 yp-3 w45 Background" listColor, "8")
         hourUpDown := this.gui.AddUpDown("+wrap Range1-12", 8)
 
@@ -2682,25 +2889,26 @@ class AlarmDialog {
         this.minuteEdit.OnEvent("Change", this.UpdateMinuteFormat.Bind(this))
         minuteUpDown.OnEvent("Change", this.UpdateMinuteFormat.Bind(this))
         
-
         ; AM/PM radio buttons
-        varAM := this.gui.AddRadio("x+15 yp+3 Group Checked", "AM")
-        varPM := this.gui.AddRadio("x+4 yp", "PM")
+        this.varAM := this.gui.AddRadio("x+15 yp+3 Group Checked", "AM")
+        this.varPM := this.gui.AddRadio("x+4 yp", "PM")
 
         ; Sound selection
         this.gui.AddText("xm y+10", "Alarm Sound:")
         this.soundDropDown := this.gui.AddDropDownList("x+5 yp-3 w200 Background" listColor, AlarmConfig.GetSoundFiles())
         this.soundDropDown.Choose(1)
         
-        testButton := this.gui.AddButton("x+5 yp-2 w45 h24", "Test")
-        testButton.OnEvent("Click", this.TestSound.Bind(this))
+        this.testButton := this.gui.AddButton("x+5 yp-2 w45 h24", "Test")
+        this.testButton.OnEvent("Click", this.TestSound.Bind(this))
 
-        ; Repeat options in AlarmDialog's CreateGui method
+        ; Repeat options
         this.repeatOnce := this.gui.AddRadio("Group xm", "Once")
         this.repeatGroup2 := this.gui.AddRadio("x+4", "3 times")
         this.repeatGroup3 := this.gui.AddRadio("x+4", "10 times")
+        
         ; Shake box
         this.visualShake := this.gui.AddCheckbox("x+60 yp", "Visual Shake")
+        
         ; Set defaults
         this.visualShake.Value := OptionsConfig.DEFAULT_ALARM_SHAKE 
         this.repeatOnce.Value := 1
@@ -2708,6 +2916,7 @@ class AlarmDialog {
         ; Weekday checkboxes
         this.gui.AddText("xm y+15", "Reoccur:")
         days := ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+        this.weekdayChecks := Map()
         for i, day in days {
             this.weekdayChecks[day] := this.gui.AddCheckbox("x+5 yp", day)
         }
@@ -2737,10 +2946,78 @@ class AlarmDialog {
             this.hourEdit.Value := FormatTime(futureTime, "h")
             this.minuteEdit.Value := FormatTime(futureTime, "mm")
             if (FormatTime(futureTime, "tt") = "PM")
-                this.gui["PM"].Value := 1
+                this.varPM.Value := 1
             else
-                this.gui["AM"].Value := 1
+                this.varAM.Value := 1
         }
+    }
+
+    ShowDatePicker(*) {
+        ; Create a calendar picker GUI
+        dateGui := Gui("+Owner" this.gui.Hwnd " +AlwaysOnTop", "Select Date")
+        dateGui.BackColor := formColor
+        dateGui.SetFont("c" fontColor)
+        
+        ; Add MonthCal control
+        cal := dateGui.Add("MonthCal", "x24 y10")
+        
+        ; Store references to use in event handlers
+        this.datePickerGui := dateGui
+        this.datePickerCal := cal
+        
+        ; Add buttons
+        okBtn := dateGui.Add("Button", "x10 y+10 w75", "OK")
+        okBtn.OnEvent("Click", this.DatePickerOK.Bind(this))
+        
+        clearBtn := dateGui.Add("Button", "x+5 w75", "Clear")
+        clearBtn.OnEvent("Click", this.DatePickerClear.Bind(this))
+        
+        cancelBtn := dateGui.Add("Button", "x+5 w75", "Cancel")
+        cancelBtn.OnEvent("Click", this.DatePickerCancel.Bind(this))
+        
+        ; Show the date picker
+        dateGui.Show()
+    }
+
+    DatePickerOK(*) {
+        selectedDate := this.datePickerCal.Value
+        readableDate := FormatTime(selectedDate, "M-d-yyyy")
+        this.selectedDate := FormatTime(selectedDate, "yyyyMMdd")
+        this.dateBtn.Text := readableDate
+        this.datePickerGui.Destroy()
+        this.datePickerGui := ""
+        this.datePickerCal := ""
+    }
+
+    DatePickerClear(*) {
+        this.selectedDate := ""
+        this.dateBtn.Text := "No date picked"
+        this.datePickerGui.Destroy()
+        this.datePickerGui := ""
+        this.datePickerCal := ""
+    }
+
+    DatePickerCancel(*) {
+        this.datePickerGui.Destroy()
+        this.datePickerGui := ""
+        this.datePickerCal := ""
+    }
+
+    ToggleTimeControls(*) {
+        ; Enable/disable time-related controls based on checkbox state
+        hasTime := this.timeCheck.Value
+        
+        ; List of controls to enable/disable
+        this.hourEdit.Enabled := hasTime
+        this.minuteEdit.Enabled := hasTime
+        this.varAM.Enabled := hasTime
+        this.varPM.Enabled := hasTime
+        this.soundDropDown.Enabled := hasTime
+        this.testButton.Enabled := hasTime
+        this.repeatOnce.Enabled := hasTime
+        this.repeatGroup2.Enabled := hasTime
+        this.repeatGroup3.Enabled := hasTime
+        this.visualShake.Enabled := hasTime
     }
 
     UpdateMinuteFormat(*) { ; Pads zeros and single digits. 00, 01, ... 09.
@@ -2763,15 +3040,26 @@ class AlarmDialog {
     }
 
     LoadExistingAlarm() {
+        ; Load the date if it exists
+        this.selectedDate := this.note.HasOwnProp("alarmDate") ? this.note.alarmDate : ""
+        if (this.selectedDate) {
+            this.dateBtn.Text := FormatTime(this.selectedDate, "M-d-yyyy")
+        }
+        
+        ; Check if alarm has time
+        hasTime := this.note.HasOwnProp("hasAlarmTime") ? this.note.hasAlarmTime : true
+        this.timeCheck.Value := hasTime
+        this.ToggleTimeControls()
+        
         ; Parse existing time
         if (this.note.alarmTime) {
             RegExMatch(this.note.alarmTime, "(\d+):(\d+)\s*(AM|PM)", &match)
             this.hourEdit.Value := match[1]
             this.minuteEdit.Value := match[2]
             if (match[3] = "PM")
-                this.gui["PM"].Value := 1
+                this.varPM.Value := 1
             else
-                this.gui["AM"].Value := 1
+                this.varAM.Value := 1
         }
         
         ; Set sound if exists
@@ -2802,11 +3090,16 @@ class AlarmDialog {
         soundPath := AlarmConfig.ALARM_SOUNDS_FOLDER "\" selectedSound
         if FileExist(soundPath) {
             try {
-                SoundPlay(soundPath, 1)
+                ; Set playing flag before attempting to play the sound
                 this.currentlyPlaying := true
+                SoundPlay(soundPath, 1)
+            } catch as err {
+                this.currentlyPlaying := false
+                LogError("Error playing sound: " err.Message)
             }
-        } else
+        } else {
             SoundBeep()
+        }
     }
 
     StopSound(*) {
@@ -2817,21 +3110,39 @@ class AlarmDialog {
     }
     
     SaveAlarm(*) {
-        ; Format time
-        hour := this.hourEdit.Value
-        minute := this.minuteEdit.Value
-        ampm := this.gui["PM"].Value ? "PM" : "AM"
-        newTime := Format("{1}:{2:02d} {3}", hour, minute, ampm)
-        
         ; Always reset cycle state when saving any alarm
         app.ResetNoteAlarmCycle(this.note.id)
         
-        ; Update alarm properties
-        this.note.alarmTime := newTime
-        this.note.hasAlarm := true
+        ; Update date
+        this.note.alarmDate := this.selectedDate
+        
+        ; Update time-related properties based on checkbox
+        hasTime := this.timeCheck.Value
+        this.note.hasAlarmTime := hasTime
+        
+        if (hasTime) {
+            ; Format time
+            hour := this.hourEdit.Value
+            minute := this.minuteEdit.Value
+            ampm := this.varPM.Value ? "PM" : "AM"
+            newTime := Format("{1}:{2:02d} {3}", hour, minute, ampm)
+            
+            ; Update alarm properties
+            this.note.alarmTime := newTime
+            this.note.hasAlarm := true
 
-        ; Save sound
-        this.note.alarmSound := AlarmConfig.ALARM_SOUNDS_FOLDER "\" this.soundDropDown.Text
+            ; Save sound
+            this.note.alarmSound := AlarmConfig.ALARM_SOUNDS_FOLDER "\" this.soundDropDown.Text
+            
+            ; Save visual shake setting
+            this.note.visualShake := this.visualShake.Value
+        } else {
+            ; For no-time alarms, still set hasAlarm but clear time-specific properties
+            this.note.hasAlarm := true
+            this.note.alarmTime := ""
+            this.note.alarmSound := ""
+            this.note.visualShake := false
+        }
         
         ; Get weekdays
         activeDays := ""
@@ -2850,8 +3161,6 @@ class AlarmDialog {
             this.note.alarmRepeatCount := 10
         else  ; Default to once if somehow none are selected
             this.note.alarmRepeatCount := 1
-
-        this.note.visualShake := this.visualShake.Value
             
         ; Save to storage immediately
         storage := NoteStorage()
@@ -2859,11 +3168,32 @@ class AlarmDialog {
 
         ; If note editor is open, update the alarm button text
         if (this.note.editor) {
-        buttonText := this.note.hasAlarm 
-            ? "&A: " this.note.alarmTime (this.note.alarmDays ? " - " this.note.alarmDays : "")
-            : "Add &Alarm..."
-        this.note.editor.addAlarmBtn.Text := buttonText
-    }
+            buttonText := "Add &Alarm..."
+            if (this.note.hasAlarm) {
+                buttonText := ""
+                ; Add date if present
+                if (this.note.alarmDate)
+                    buttonText .= FormatTime(this.note.alarmDate, "MMM-dd")
+                    
+                ; Add time if present
+                if (this.note.alarmTime) {
+                    ; Add space if we already have date
+                    if (this.note.alarmDate)
+                        buttonText .= " "
+                    buttonText .= this.note.alarmTime
+                }
+                
+                ; Add weekday recurrence information
+                if (this.note.alarmDays)
+                    buttonText .= " -" . this.note.alarmDays
+            }
+            this.note.editor.addAlarmBtn.Text := buttonText
+        }
+        
+        ; Update main window ListView if it's visible
+        if WinExist("ahk_id " app.mainWindow.gui.Hwnd) {
+            app.mainWindow.PopulateNoteList()
+        }
 
         ; Close dialog
         this.Destroy()
@@ -2897,7 +3227,7 @@ class AlarmDialog {
                 this.Destroy()
             }
         } catch Error as err {
-            LogError("Error in AlarmDialog.DeleteAlarm: " err.Message "`n")
+            LogError("Error in AlarmDialog.DeleteAlarm: " err.Message)
         }
     }
 
@@ -3084,11 +3414,11 @@ class MainWindow {
 
         ; Create ListView with columns
         this.noteList := this.gui.Add("ListView", 
-            "x10 y+5 w" totalWidth " h200 Background" listColor, 
+            "x10 y+5 w" totalWidth " h200 " (OptionsConfig.DISABLE_TABLE_SORT? "NoSort" : "") " Background" listColor, 
             ["Created", "Delete Time|Note Contents", "Alarm|Window"])
 
         ; Set column widths
-        this.noteList.ModifyCol(1, 70)
+        this.noteList.ModifyCol(1, 24)
         this.noteList.ModifyCol(2, totalWidth * 0.80) 
         this.noteList.ModifyCol(3, totalWidth * 0.35)
 
@@ -3139,7 +3469,7 @@ class MainWindow {
             . "`t" FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) "`t = Show/Hide Window`n"
             . "`t" (OptionsConfig.CHECKBOX_MODIFIER_KEY? OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click`t`t = Toggle Checkbox in sticky note`n`n" : "`n")
             . "`t`t~~~Tips for Sticky Note Manager~~~`n"
-            . "Select list item, then double-click for editor.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  You must let preview disappear before viewing the next one. Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, deleted, or undeleted.  Drag edge/corner of window to change its size. When deleted notes are shown, identify them by the date and time of deletion, in note text column.`n`n"
+            . "Select list item, then double-click for editor.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, deleted, or undeleted.  Drag edge/corner of window to change its size. When deleted notes are shown, identify them by the date and time of deletion, in note text column.`n`n"
             . "`t`t~~~Tips for Sticky Notes~~~`n"
             . "The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area. Notes can be 'stuck to' certain windows.  Then they will disappear until the window is active again.  New notes will cycle in terms of position, note color, and font color.  Cycling font color can be turned off.  Note editor width will try to match with of note.  Right click note for context menu of commands.  Deleted notes are purged after X days.`n`n"
             . "`t`t~~~Tips for Alarms~~~`n"
@@ -3238,7 +3568,21 @@ class MainWindow {
 
             ; Add alarm info if present
             if (noteData.hasAlarm) {
-                combinedInfo := noteData.alarmTime (noteData.alarmDays ? " (" AlarmConfig.SortDays(noteData.alarmDays) ")" : "")
+                ; Start with date if present
+                if (noteData.alarmDate)
+                    combinedInfo .= FormatTime(noteData.alarmDate, "MMM-dd")
+                
+                ; Add time if present
+                if (noteData.alarmTime) {
+                    ; Add space if we already have date
+                    if (noteData.alarmDate)
+                        combinedInfo .= " "
+                    combinedInfo .= noteData.alarmTime
+                }
+                
+                ; Add weekday info if present
+                if (noteData.alarmDays)
+                    combinedInfo .= " (" . AlarmConfig.SortDays(noteData.alarmDays) . ")"
             }
 
             ; Add window info if present
@@ -3288,6 +3632,18 @@ class MainWindow {
                 tooltipInitialized := true
             }
             
+            ; If there's a tooltip already showing, first reset and clear it
+            if (tooltipShowing) {
+                ToolTip()  ; Clear the current tooltip
+                tooltipShowing := false
+                Sleep(50)  ; Small delay to ensure clearing
+                
+                ; Explicitly reset all tooltip formatting to defaults
+                ToolTipOpts.SetColors("", "")  ; Reset to default colors
+                ToolTipOpts.SetFont()  ; Reset to default font
+                ToolTipOpts.SetMaxWidth(0)  ; Reset max width
+            }
+            
             ; Clean up content
             content := StrReplace(noteData.content, "`r`n", "`n")  
             content := StrReplace(content, "`r", "`n")    
@@ -3302,12 +3658,16 @@ class MainWindow {
             tooltipShowing := true
             
             ; Set up timer to hide tooltip after 2 seconds
-            SetTimer () => (ToolTip(), tooltipShowing := false), -2000
+            SetTimer () => (ToolTip(), tooltipShowing := false, ToolTipOpts.SetColors("", ""), ToolTipOpts.SetFont(), ToolTipOpts.SetMaxWidth(0)), -2000
             
         } catch Error as err {
-            LogError("Error in HandleClick: " err.Message "`n")
+            LogError("Error in HandleClick: " err.Message)
             ToolTip()
             tooltipShowing := false
+            ; Reset tooltip formatting on error
+            ToolTipOpts.SetColors("", "")
+            ToolTipOpts.SetFont()
+            ToolTipOpts.SetMaxWidth(0)
         }
     }
             
@@ -3379,7 +3739,7 @@ class MainWindow {
         } else {
             ; Multiple note deletion - always show warning regardless of setting
             if (MsgBox("Are you sure you want to delete " selectedIds.Length " notes?",
-                "Delete Multiple Notes", "YesNo 0x30 Owner" this.mainwindow.gui.Hwnd) = "Yes") {
+                "Delete Multiple Notes", "YesNo 0x30 Owner" this.gui.Hwnd) = "Yes") {
                 ; Temporarily disable list updates
                 this.gui.Opt("+Disabled")  ; Prevent user interaction during deletion
                 
@@ -3574,8 +3934,8 @@ class MainWindow {
             
             ; Update bottom button Y positions
             buttonY := lvY + newLVHeight + 10  ; 10px spacing after ListView
-            this.noteList.ModifyCol(1, 70)
-            this.noteList.ModifyCol(2, Integer(fullWidth * 0.80))
+            this.noteList.ModifyCol(1, 24)
+            this.noteList.ModifyCol(2, Integer(fullWidth * 0.75))
             this.noteList.ModifyCol(3, Integer(fullWidth * 0.35))
             
             ; Update "Hide This Window" button
@@ -3635,7 +3995,7 @@ class MainWindow {
             }
             
         } catch Error as err {
-            LogError("Error in ResizeControls: " err.Message "`n")
+            LogError("Error in ResizeControls: " err.Message)
         }
     }
 
@@ -3800,14 +4160,21 @@ Class ToolTipOpts {
     }
 }
 
+startupLog()
+startupLog(*) {
+    FileAppend("============= SCRIPT START " formatTime(A_Now
+    , "MMM-dd hh:mm:ss") " =============`n"
+    , "error_debug_log.txt")
+}
+
 ; Helper functions for conditional logging
 LogError(message) {
     if (OptionsConfig.ERROR_LOG) {
-        FileAppend("ErrLog: " message "`n", "error_debug_log.txt")
+        FileAppend("ErrLog: " formatTime(A_Now, "MMM-dd hh:mm:ss") ": " message "`n", "error_debug_log.txt")
     }
 }
 Debug(message) {
     if (OptionsConfig.DEBUG_LOG) {
-        FileAppend("Debug: " message "`n", "error_debug_log.txt")
+        FileAppend("Debug: " formatTime(A_Now, "MMM-dd hh:mm:ss") ": " message "`n", "error_debug_log.txt")
     }
 }

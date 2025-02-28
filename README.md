@@ -84,19 +84,20 @@ This script was developed primarily through AI-assisted coding, with Claude AI g
 include additional human-written code for enhanced features and bug fixes.. The system tray context menu has a few extra items, such as "Start with Windows."
 
 This script is unique because nearly every bit of code was created with AI prompts, then pasted into the ahk editor.  A great deal of human input was needed, but very little of the actual code was human-generated.  Edit: In later versions, more human code was added.
-![Screenshot of Sticky Notes tool](https://i.imgur.com/GKEZ5er.png)
+![Screenshot of Sticky Notes tool](https://i.imgur.com/QtzJshJ.png)
 Screenshot explanation:
-1.	Sticky Note. Top/Center is "dragbar." Drag the dragbar to move the note. Double-click the dragbar to open the editor. Right-click the note for the context menu.  The notes have optional borders to visually differentiate them.  
-2.	Alt+Click interactive checkbox items to toggle.
-3.	Note Editor. Most of the formatting options are found here. Make checkbox items as seen in image.
-4.	Alarm Settings gui.  After an alarm plays, it deletes itself unless it recurs on specified weekdays.   Choose from a folder of .wav files.  There is a ‘test’ button and a ‘stop’ button.  
-5.	Sticky Note context menu.  When a note is alarmed, additional items (‘Stop’, ‘Delete Alarm’) are added to the menu.
-6.	Sticky Notes Manager gui form. It is hidden by default. Default hotkey to show it is Win+Shift+S.  The buttons on the top are for mostly ‘app-level’ commands.
-7.	The Filter Settings for the colorized ListView of notes.  Use edit box to filter list by note text.
-8.	Select a note from the list and right-click for a 2 second pop up preview.  Note: Must let preview timeout before previewing another.  Left double-click to edit note.  Note: You might need to unhide a note before editing or deleting it.
-9.	List row colors match note back and font colors. 
-10.	The buttons on the bottom are for mostly ‘note-level’ commands.  You can Ctrl+Click to select multiple items.  Multi-selected items can be bulk hidden/unhidden or deleted. 
-11.	System tray icon right click menu has a few optons such as ‘Start with Windows’ and ‘Open Note ini File.’
-12.	The Tips dialog just shows a few tips.  It also lists the (customizable) hotkey combinations.
-
-- 2-17-2025: not in screenshot:  "Stick to window" button in note editor and corresponding dialog.  "Visual shake" checkbox in alarm dialog.
+1.	Sticky Note. The top/center of each note is a "drag area." Drag the drag area to move the note. Double-click the drag area to open the editor. Right-click the note for the context menu.  Size of drag area can be customized.  The top area of the note can be reserved. (It is not reserved in the image.)  The notes have optional borders to visually differentiate them.  Border color matches font color.
+2.	 Alt+Click interactive checkbox items to toggle.  Checkboxes are typed into the note text by starting a new line with [] or [x].  Checkbox text doesn’t wrap.  Long items will override the note width setting. 
+3.	Note Editor. Most of the formatting options are found here. Make checkbox items as seen in image.  The top group of dialog controls are for formatting.  Default colors of new notes cycle with each new note, but you can manually select colors or click “random” for random colors.  The bottom group of controls are note options.  The “Add Alarm” button opens the Set Alarm dialog seen in the image.  The “Stick to Window” button opens a dialog with a list of the current visible windows on your computer (not seen in image).  Stuck windows auto show/hide with their associated window.   The Width box is for the width of the note.  The editor will mostly change width too.  
+4.	Alarm Settings Dialog.  Single occurrence alarms delete themselves from the note after playing.  An alarm can have a date and/or time.  Timed alarms can have custom sounds.  Choose from a folder of .wav files.  There is a sound ‘test’ button and a ‘stop’ button.  Timed alarms can also “Shake.”  The duration and amount of shake are customizable.  Untimed dated or recurring alarms silently unhide themselves the morning of the associated date or weekday. 
+5.	Alarm date picker dialog. 
+6.	Sticky Note context menu.  When a note is alarmed, additional items (‘Stop’, ‘Delete Alarm’) are added to the menu.  The “Show Hidden” and the “Undelete a note” items popup a submenu of the hidden or deleted items.  Deleted items get purged from the ini settings file after X days.
+7.	Submenu showing recently deleted items.  Choose one to undelete, or choose multiple from the Note Manager list. 
+8.	Sticky Notes Manager gui form. It is hidden by default. Default hotkey to show it is Win+Shift+S.  
+9.	The buttons on the top are for mostly ‘app-level’ commands.
+10.	The Filter Settings for the colorized ListView of notes.  Deleted notes are hidden by default.  Use edit box to filter list by note text.
+11.	Select a note from the list and right-click for a two-second pop up preview.  List row colors match note back and font colors.  Left double-click to edit note.  Note: You might need to unhide a note before editing or deleting it.  Drag edge of Note Manager window to resize the list and show more notes.  List is sorted by first column which is creation date.  It is really small to make more room for column two.  Column two shows note text.  It any deleted notes are shown, then column two will have Deletion date/time stamp preceding the note text (not seen in image).  Column three has the Alarm date and/or time, and lists the stuck-to window.   
+12.	The buttons on the bottom are for mostly ‘note-level’ commands.  You can Ctrl+Click to select multiple items.  Multi-selected items can be bulk hidden/unhidden or deleted. 
+13.	The Tips dialog just shows a few tips.  It also lists the current (customizable) hotkey combinations.
+14.	System tray icon right click menu has a few options such as ‘Start with Windows’ and ‘Open Note ini File.’
+15.	This is just my Desktop...  I added that marker accidentally!

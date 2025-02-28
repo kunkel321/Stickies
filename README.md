@@ -33,6 +33,15 @@ Features, Functionality, Usage, and Tips:
 - Multiple alarm repeats: Choose between once, 3x, or 10x alarm repetitions
 - Alarm sounds: Custom alarm sounds can be added to the Sounds folder
 - Smart alarm management: System detects and reports missed alarms on startup
+- An alarm can have a: date and/or time and/or recurrence 
+- The logic for alarms is this:
+- > Date + time + no weekly recurrence: plays once on given date, then deletes itself
+- > Date + no time + no weekly recurrence: note appears in morning on date with no sound/shake, then alarm deletes
+- > Date + time + weekly recurrence: plays on given date, doesn't delete itself, plays again on recurring days
+- > Date + no time + weekly recurrence: note appears in morning on date, doesn't delete, reappears on recurring days
+- > No date + no time + weekly recurrence: note appears in morning on recurring weekdays
+- > No date + time + no weekly recurrence: plays at specified time
+- > No date + time + weekly recurrence: plays at specified time on recurring days
 - Main window with note management, preview, and search functionality
 - Color-coded notes: Notes maintain their color scheme in preview list
 - Rich preview: Right-click notes in manager for formatted preview with original fonts/colors
@@ -54,24 +63,23 @@ Features, Functionality, Usage, and Tips:
 - Notes auto-save position when moved
 - Turn off note deletion warning
 - Undelete notes
-- Deleted notes are purged from ini file after 7 days (Configurable)
+- Deleted notes are purged from ini file after 3 days (Configurable)
 - Checkbox Creation: Any text line starting with [] or [x] becomes an interactive checkbox
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
-- All note data saved to sticky_notes.ini in script directory
 - Hidden or deleted notes can be restored through main window or via note context menu
+- All note data saved to sticky_notes.ini in script directory
 - Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
 - Use manual "Save Status" after significant changes
 - "Load/Reload Notes" refreshes all notes from storage
 - System tray icon provides quick access to common functions
 - Start with Windows: Option available in tray menu
-  
-Known Issues:
--------------
-- In note listview, when previewing, must let preview time-out before previewing another
-- In note listview, if notes are sorted, colors will not sort with them
+
+Known Issue:
+------------
+- In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled.
 
 Development Note:
-----------------
+-----------------
 This script was developed primarily through AI-assisted coding, with Claude AI generating most of the base code structure and functionality. Later versions 
 include additional human-written code for enhanced features and bug fixes.. The system tray context menu has a few extra items, such as "Start with Windows."
 

@@ -6,7 +6,7 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    2-27-2025
+Version:    3-1-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -43,8 +43,8 @@ Features, Functionality, Usage, and Tips:
 - Color-coded notes: Notes maintain their color scheme in preview list
 - Rich preview: Right-click notes in manager for formatted preview with original fonts/colors
 - Search functionality: Filter notes by content in main window
-- Selective display: Filter note list to show only hidden or visible notes
-- Include recently deleted note in hidden/visible listview filter
+- Display by visibility: Filter note list to show only hidden or visible, or all notes
+- Display by deletion: Filter note list to show only deleted or extant, or all notes
 - Deleted notes are identified by deletion time appearing in listview
 - Access main window with Win+Shift+S (hidden by default)
 - Resize main window, by dragging edge/corner, to see more of note text in listview
@@ -588,14 +588,35 @@ class StickyNotes {
         for alarmNote in notesWithAlarms {
             note := alarmNote.note
             
+        ; Skip if alarm time is not set or is empty
+        if (!note.alarmTime || note.alarmTime = "") {
+            continue
+        }
+
+        ; Now safely parse the time
+        try {
             alarmParts := StrSplit(note.alarmTime, " ")
+            if (alarmParts.Length < 2) {
+                LogError("Invalid alarm time format for note " id ": " note.alarmTime)
+                continue
+            }
+            
             timeParts := StrSplit(alarmParts[1], ":")
+            if (timeParts.Length < 2) {
+                LogError("Invalid time format for note " id ": " alarmParts[1])
+                continue
+            }
+            
             hour := Integer(timeParts[1])
             minute := Integer(timeParts[2])
             if (alarmParts[2] = "PM" && hour != 12)
                 hour += 12
             else if (alarmParts[2] = "AM" && hour = 12)
                 hour := 0
+        } catch Error as err {
+            LogError("Error parsing alarm time for note " id ": " err.Message)
+            continue
+        }
 
             if ((hour < currentHour) || (hour = currentHour && minute < currentMinute)) {
                 if (!note.alarmDays || InStr(note.alarmDays, shortDay)) {
@@ -3372,44 +3393,61 @@ class MainWindow {
         this.separators.Push(this.gui.Add("Text", "x10 y+10 w" totalWidth " h2 0x10"))  ; Horizontal line
 
         ; Top row buttons
-        tempBtn := this.gui.Add("Button", "x10 y+10 w" buttonW " h30", "&New Note")
+        tempBtn := this.gui.Add("Button", "x10 y+10 w" buttonW " h25", "&New Note")
         tempBtn.OnEvent("Click", (*) => app.CreateNewNote())
         this.topButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "From Clpbrd")
+        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h25", "From Clpbrd")
         tempBtn.OnEvent("Click", (*) => app.CreateClipboardNote())
         this.topButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Re&Load Notes")
+        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h25", "Re&Load Notes")
         tempBtn.OnEvent("Click", (*) => app.noteManager.LoadSavedNotes())
         this.topButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "Hide App")
+        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h25", "Hide App")
         tempBtn.OnEvent("Click", (*) => this.Hide())
         this.topButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "Save Status")
+        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h25", "Save Status")
         tempBtn.OnEvent("Click", (*) => app.noteManager.SaveAllNotes())
         this.topButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Exit App")
+        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h25", "Exit App")
         tempBtn.OnEvent("Click", (*) => this.ExitApp())
         this.topButtons.push(tempBtn)
 
-        ; Add separator before ListView
-        this.separators.Push(this.gui.Add("Text", "x10 y+10 w" totalWidth " h2 0x10"))  ; Horizontal line
+        ; First group - radio buttons for note visibility status
+        this.gui.SetFont("s" (textFont - 2))
+        this.gui.Add("GroupBox"
+            ,"x10 y+3 w" (totalWidth/2 - 22) " h43 Center Background" formColor
+            ,"Visibility Status")
+        this.gui.SetFont("s" textFont)
+        this.filterHiddenOnly := this.gui.Add("Radio", "x20 yp+18 Group", "Hidden")
+        this.filterVisibleOnly := this.gui.Add("Radio", "x+5 yp", "Visible")
+        this.filterAllVisibility := this.gui.Add("Radio", "x+5 yp  Checked", "All")
 
-        ; Add filter controls
-        this.gui.Add("Text", "x10 y+10", "Show:")
-        this.filterHidden := this.gui.Add("Checkbox", "x+5 yp Checked", "Hidden")
-        this.filterVisible := this.gui.Add("Checkbox", "x+10 yp Checked", "Visible")
-        this.filterDeleted := this.gui.Add("Checkbox", "x+10 yp", "Deleted")  ; Unchecked by default
-        this.searchEdit := this.gui.Add("Edit", "x+10 yp-3 w240", "")
+        ; Second group - radio buttons for deletion status
+        this.gui.SetFont("s" (textFont - 2))
+        this.gui.Add("GroupBox"
+            ,"x" (totalWidth/2 - 3) " yp-18 w" (totalWidth/2 - 10) " h43 Center Background" formColor
+            ,"Deletion Status")
+        this.gui.SetFont("s" textFont)
+        this.filterDeletedOnly := this.gui.Add("Radio", "xp+14 yp+18 Group", "Deleted")
+        this.filterNonDeletedOnly := this.gui.Add("Radio", "x+5 yp Checked", "Extant")
+        this.filterAllNotes := this.gui.Add("Radio", "x+5 yp ", "All")
+
+        ; Search box
+        this.gui.Add("Text", "x10 y+18", "Search:")
+        this.searchEdit := this.gui.Add("Edit", "x+25 yp-3 w220", "")
 
         ; Add filter events
-        this.filterHidden.OnEvent("Click", (*) => this.PopulateNoteList())
-        this.filterVisible.OnEvent("Click", (*) => this.PopulateNoteList())
-        this.filterDeleted.OnEvent("Click", (*) => this.PopulateNoteList())
+        this.filterAllVisibility.OnEvent("Click", (*) => this.PopulateNoteList())
+        this.filterHiddenOnly.OnEvent("Click", (*) => this.PopulateNoteList())
+        this.filterVisibleOnly.OnEvent("Click", (*) => this.PopulateNoteList())
+        this.filterAllNotes.OnEvent("Click", (*) => this.PopulateNoteList())
+        this.filterDeletedOnly.OnEvent("Click", (*) => this.PopulateNoteList())
+        this.filterNonDeletedOnly.OnEvent("Click", (*) => this.PopulateNoteList())
         this.searchEdit.OnEvent("Change", (*) => this.PopulateNoteList())
 
         ; Create ListView with columns
@@ -3431,28 +3469,28 @@ class MainWindow {
 
         buttonY := "y+10"
         ; Bottom row buttons
-        tempBtn := this.gui.Add("Button", "x10 " buttonY " w" buttonW " h30", "&Edit Note")
+        tempBtn := this.gui.Add("Button", "x10 " buttonY " w" buttonW " h25", "&Edit Note")
         tempBtn.OnEvent("Click", (*) => this.EditSelectedNote())
         this.botButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "&Hide Note")
+        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h25", "&Hide Note")
         tempBtn.OnEvent("Click", (*) => this.HideSelectedNote())
         
         this.botButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "&Delete Note")
+        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h25", "&Delete Note")
         tempBtn.OnEvent("Click", (*) => this.DeleteSelectedNote())
         this.botButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h30", "Bring Fwd")
+        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h25", "Bring Fwd")
         tempBtn.OnEvent("Click", (*) => this.ShowSelectedNote())
         this.botButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h30", "&Unhide Note")
+        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h25", "&Unhide Note")
         tempBtn.OnEvent("Click", (*) => this.UnhideSelectedNote())
         this.botButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h30", "Undelete")
+        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h25", "Undelete")
         tempBtn.OnEvent("Click", (*) => this.UndeleteSelectedNotes())
         this.botButtons.push(tempBtn)
         
@@ -3496,48 +3534,26 @@ class MainWindow {
         searchText := this.searchEdit.Text
         
         for noteData in savedNotes {
-                        isHidden := Integer(noteData.isHidden)
+            isHidden := Integer(noteData.isHidden)
             deletedTime := IniRead(OptionsConfig.INI_FILE, "Note-" noteData.id, "DeletedTime", "")
             isDeleted := deletedTime != ""
             
-            ; Determine if this note should be shown based on its state and filters
-            shouldShow := false
-
-            ; First check if it's a deleted note
-            if (isDeleted) {
-                ; For deleted notes, we need both:
-                ; 1. The Deleted filter must be on AND
-                ; 2. Either Hidden or Visible filter must match the note's hidden state
-                if (this.filterDeleted.Value) {
-                    if (isHidden && this.filterHidden.Value) {
-                        shouldShow := true
-                    } else if (!isHidden && this.filterVisible.Value) {
-                        shouldShow := true
-                    }
-                }
-            } else {
-                ; For non-deleted notes, just check hidden state
-                if (isHidden && this.filterHidden.Value) {
-                    shouldShow := true
-                } else if (!isHidden && this.filterVisible.Value) {
-                    shouldShow := true
-                }
+            ; First check deletion status filter
+            if (this.filterDeletedOnly.Value && !isDeleted) {
+                continue  ; Skip non-deleted notes when "Deleted Only" is selected
             }
 
-            ; If no filters are checked, show nothing
-            if (!this.filterHidden.Value && !this.filterVisible.Value && !this.filterDeleted.Value) {
-                shouldShow := false
+            if (this.filterNonDeletedOnly.Value && isDeleted) {
+                continue  ; Skip deleted notes when "Non-Deleted Only" is selected
             }
 
-            if (!shouldShow) {
-                continue
+            ; Then check hidden/visible status
+            if (this.filterHiddenOnly.Value && !isHidden) {
+                continue  ; Skip visible notes when "Hidden Only" is selected
             }
 
-            ; Apply filters
-            if ((!this.filterHidden.Value && isHidden) || 
-                (!this.filterVisible.Value && !isHidden) ||
-                (!this.filterDeleted.Value && isDeleted)) {
-                continue
+            if (this.filterVisibleOnly.Value && isHidden) {
+                continue  ; Skip hidden notes when "Visible Only" is selected
             }
                 
             if (searchText && !InStr(noteData.content, searchText, true))

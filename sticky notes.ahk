@@ -6,7 +6,7 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    3-1-2025
+Version:    3-7-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -95,6 +95,7 @@ class OptionsConfig {
     static TOGGLE_MAIN_WINDOW    := "+#s"  ; Shift+Win+S. Shows/Hide Note Manager window.
     static NEW_NOTE              := "+#n"  ; Shift+Win+N. New note.
     static NEW_CLIPBOARD_NOTE    := "+#c"  ; Shift+Win+C. New note from text on clipboard.
+    static HIGHLIGHT_SEARCH      := "^f"    ; <---------- Not implemented yet
     static APP_ICON              := "sticky.ico" ; Homemade icon that kunkel321 made.
     static INI_FILE              := "sticky_notes.ini" ; The note storage file. 
     static AUTO_OPEN_EDITOR      := true   ; Should Note Editor auto open upon note creation?    
@@ -239,7 +240,11 @@ class StickyNotes {
         ; Bind hotkeys to methods
         HotKey(OptionsConfig.TOGGLE_MAIN_WINDOW, (*) => this.ToggleMainWindow())
         HotKey(OptionsConfig.NEW_NOTE, (*) => this.CreateNewNote())
-        HotKey(OptionsConfig.NEW_CLIPBOARD_NOTE, (*) => this.CreateClipboardNote())  ; Add this line
+        HotKey(OptionsConfig.NEW_CLIPBOARD_NOTE, (*) => this.CreateClipboardNote())
+            ; Set up context-sensitive hotkey for searching
+        HotIfWinActive("ahk_id " this.mainWindow.gui.Hwnd)
+        HotKey(OptionsConfig.HIGHLIGHT_SEARCH, (*) => this.FocusSearchBox())
+        HotIf()
     }
     
     ToggleMainWindow(*) {
@@ -248,6 +253,12 @@ class StickyNotes {
         } else {
             this.mainWindow.Show()
             this.mainWindow.PopulateNoteList()
+        }
+    }
+
+    FocusSearchBox(*) {
+        if (this.mainWindow && this.mainWindow.searchEdit) {
+            this.mainWindow.searchEdit.Focus()
         }
     }
     
@@ -3405,7 +3416,7 @@ class MainWindow {
         tempBtn.OnEvent("Click", (*) => app.noteManager.LoadSavedNotes())
         this.topButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h25", "Hide App")
+        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h25", "&Hide App")
         tempBtn.OnEvent("Click", (*) => this.Hide())
         this.topButtons.push(tempBtn)
 

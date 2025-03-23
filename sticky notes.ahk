@@ -6,7 +6,7 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    3-7-2025
+Version:    3-23-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -214,6 +214,9 @@ class StickyNotes {
         this.LoadNotesOnStartup()
         this.CheckMissedAlarms()
         SetTimer(this.CheckAlarms.Bind(this), 1000)
+        ; Run date-only checks immediately at startup and then every minute
+        this.CheckDateOnlyAlarms()
+        SetTimer(this.CheckDateOnlyAlarms.Bind(this), 1000*60)
         ; Purge old deleted notes on startup
         (NoteStorage()).PurgeOldDeletedNotes()
     }
@@ -378,8 +381,18 @@ class StickyNotes {
     }
 
     ResetNoteAlarmCycle(noteId) {
-        if (this.cycleComplete.Has(noteId)) {
+        ; Check if the key exists before trying to delete it
+        if (this.cycleComplete && this.cycleComplete.Has(noteId)) {
             this.cycleComplete.Delete(noteId)
+        }
+        
+        ; Also handle the other tracking maps
+        if (this.playCount && this.playCount.Has(noteId)) {
+            this.playCount.Delete(noteId)
+        }
+        
+        if (this.lastPlayTime && this.lastPlayTime.Has(noteId)) {
+            this.lastPlayTime.Delete(noteId)
         }
     }
 
@@ -432,9 +445,13 @@ class StickyNotes {
             ; Reset tracking if alarm time has changed
             if (this.playCount.Has(id)) {
                 if (note.alarmTime != FormatTime(this.lastPlayTime[id], "h:mm tt")) {
-                    this.playCount.Delete(id)
-                    this.lastPlayTime.Delete(id)
-                    this.cycleComplete.Delete(id)
+                    ; Clean up tracking maps - check before deleting
+                    if (this.playCount && this.playCount.Has(id))
+                        this.playCount.Delete(id)
+                    if (this.lastPlayTime && this.lastPlayTime.Has(id))
+                        this.lastPlayTime.Delete(id)
+                    if (this.cycleComplete && this.cycleComplete.Has(id))
+                        this.cycleComplete.Delete(id)
                 }
             }
             
@@ -468,10 +485,13 @@ class StickyNotes {
                         continue
                     }
                 } 
-                ; For date & no-time alarms, check if it's morning time
+                 ; For date & no-time alarms, check if it's morning time
                 else if (!isMorningTime) {
                     continue
                 }
+                
+            ; If we get here, we have a date that matches today and it's morning time (or we have no time constraint)
+            Debug("Date-based untimed alarm triggered for note " id)
             } 
             ; For time-only alarms (no date), check the time
             else if (note.hasAlarmTime) {
@@ -562,9 +582,13 @@ class StickyNotes {
                         storage.SaveNote(note)
                     }
                     
-                    ; Clean up tracking maps
-                    this.playCount.Delete(id)
-                    this.lastPlayTime.Delete(id)
+                    ; Clean up tracking maps - check before deleting
+                    if (this.playCount && this.playCount.Has(id))
+                        this.playCount.Delete(id)
+                    if (this.lastPlayTime && this.lastPlayTime.Has(id))
+                        this.lastPlayTime.Delete(id)
+                    if (this.cycleComplete && this.cycleComplete.Has(id))
+                        this.cycleComplete.Delete(id)
                 }
             }
         }
@@ -573,6 +597,8 @@ class StickyNotes {
     CheckMissedAlarms() {
         currentTime := FormatTime(A_Now, "h:mm tt")
         currentDay := FormatTime(A_Now, "ddd")
+        currentDate := FormatTime(A_Now, "yyyyMMdd")
+        
         dayMap := Map(
             "Sun", "Su", "Mon", "Mo", "Tue", "Tu",
             "Wed", "We", "Thu", "Th", "Fri", "Fr", "Sat", "Sa"
@@ -598,41 +624,80 @@ class StickyNotes {
         missedAlarms := []
         for alarmNote in notesWithAlarms {
             note := alarmNote.note
+            id := alarmNote.id
             
-        ; Skip if alarm time is not set or is empty
-        if (!note.alarmTime || note.alarmTime = "") {
-            continue
-        }
-
-        ; Now safely parse the time
-        try {
-            alarmParts := StrSplit(note.alarmTime, " ")
-            if (alarmParts.Length < 2) {
-                LogError("Invalid alarm time format for note " id ": " note.alarmTime)
+            ; Skip if alarm time is not set or is empty
+            if (!note.alarmTime || note.alarmTime = "") {
                 continue
             }
             
-            timeParts := StrSplit(alarmParts[1], ":")
-            if (timeParts.Length < 2) {
-                LogError("Invalid time format for note " id ": " alarmParts[1])
+            ; Skip if the alarm has a date and it's for a future date
+            if (note.alarmDate && note.alarmDate > currentDate) {
                 continue
             }
-            
-            hour := Integer(timeParts[1])
-            minute := Integer(timeParts[2])
-            if (alarmParts[2] = "PM" && hour != 12)
-                hour += 12
-            else if (alarmParts[2] = "AM" && hour = 12)
-                hour := 0
-        } catch Error as err {
-            LogError("Error parsing alarm time for note " id ": " err.Message)
-            continue
-        }
 
-            if ((hour < currentHour) || (hour = currentHour && minute < currentMinute)) {
+            ; Now safely parse the time
+            try {
+                alarmParts := StrSplit(note.alarmTime, " ")
+                if (alarmParts.Length < 2) {
+                    LogError("Invalid alarm time format for note " id ": " note.alarmTime)
+                    continue
+                }
+                
+                timeParts := StrSplit(alarmParts[1], ":")
+                if (timeParts.Length < 2) {
+                    LogError("Invalid time format for note " id ": " alarmParts[1])
+                    continue
+                }
+                
+                hour := Integer(timeParts[1])
+                minute := Integer(timeParts[2])
+                if (alarmParts[2] = "PM" && hour != 12)
+                    hour += 12
+                else if (alarmParts[2] = "AM" && hour = 12)
+                    hour := 0
+            } catch Error as err {
+                LogError("Error parsing alarm time for note " id ": " err.Message)
+                continue
+            }
+
+            ; For alarms with a specific date:
+            if (note.alarmDate) {
+                ; If it's for today, check if the time has passed
+                if (note.alarmDate = currentDate) {
+                    if ((hour < currentHour) || (hour = currentHour && minute < currentMinute)) {
+                        if (!note.alarmDays || InStr(note.alarmDays, shortDay)) {
+                            if (note.lastPlayDate != currentDate) {
+                                previewText := StrLen(note.content) > 50 ? SubStr(note.content, 1, 47) "..." : note.content
+                                missedAlarms.Push({
+                                    time: note.alarmTime,
+                                    date: FormatTime(note.alarmDate, "M-d-yyyy"),
+                                    recurrence: note.alarmDays ? note.alarmDays : "Once",
+                                    sound: note.alarmSound,
+                                    preview: previewText
+                                })
+                            }
+                        }
+                    }
+                }
+                ; If it's for a past date, it's definitely missed
+                else if (note.alarmDate < currentDate) {
+                    if (note.lastPlayDate != note.alarmDate) {
+                        previewText := StrLen(note.content) > 50 ? SubStr(note.content, 1, 47) "..." : note.content
+                        missedAlarms.Push({
+                            time: note.alarmTime,
+                            date: FormatTime(note.alarmDate, "M-d-yyyy"),
+                            recurrence: note.alarmDays ? note.alarmDays : "Once",
+                            sound: note.alarmSound,
+                            preview: previewText
+                        })
+                    }
+                }
+            }
+            ; For time-only alarms (no date), use the existing logic
+            else if ((hour < currentHour) || (hour = currentHour && minute < currentMinute)) {
                 if (!note.alarmDays || InStr(note.alarmDays, shortDay)) {
-                    todayDate := FormatTime(A_Now, "yyyyMMdd")
-                    if (note.lastPlayDate != todayDate) {
+                    if (note.lastPlayDate != currentDate) {
                         previewText := StrLen(note.content) > 50 ? SubStr(note.content, 1, 47) "..." : note.content
                         missedAlarms.Push({
                             time: note.alarmTime,
@@ -648,12 +713,170 @@ class StickyNotes {
         if (missedAlarms.Length > 0) {
             combinedMessage := "Missed Alarms:`n`n"
             for alarm in missedAlarms {
+                combinedMessage .= alarm.HasOwnProp("date") ? "Date: " alarm.date "`n" : ""
                 combinedMessage .= "Time: " alarm.time "`n"
                     . "Recurrence: " alarm.recurrence "`n"
                     . "Sound: " alarm.sound "`n"
                     . "Note preview: " alarm.preview "`n`n"
             }
             MsgBox(combinedMessage, "Missed Alarms")
+        }
+    }
+
+    CheckDateOnlyAlarms() {
+        currentDate := FormatTime(, "yyyyMMdd")
+        currentDay := FormatTime(, "ddd")
+        
+        Debug("Running date-only alarm check - Current date: " currentDate " Day: " currentDay)
+        
+        ; Convert current day to short format
+        dayMap := Map(
+            "Sun", "Su",
+            "Mon", "Mo",
+            "Tue", "Tu",
+            "Wed", "We",
+            "Thu", "Th",
+            "Fri", "Fr",
+            "Sat", "Sa"
+        )
+        shortDay := dayMap[currentDay]
+        
+        ; Check if it's morning time (considering a wider range for debugging)
+        isMorningTime := (A_Hour >= 6 && A_Hour < 10)
+        Debug("Morning time check: " isMorningTime " (Hour: " A_Hour ")")
+        
+        ; Get all notes from INI file, including hidden ones
+        storage := NoteStorage()
+        allNotes := storage.LoadAllNotes()
+        
+        ; Process each note
+        for noteData in allNotes {
+            id := noteData.id
+            
+            ; Skip notes without alarms
+            if (!noteData.hasAlarm) {
+                continue
+            }
+            
+            Debug("Checking note " id " - hasAlarmTime: " noteData.hasAlarmTime 
+                ", alarmDate: " noteData.alarmDate 
+                ", alarmDays: " noteData.alarmDays
+                ", lastPlayDate: " noteData.lastPlayDate
+                ", isHidden: " noteData.isHidden)
+            
+            ; Focus specifically on date-only alarms (no time)
+            if (noteData.hasAlarmTime) {
+                Debug("Note " id " has a time-based alarm, skipping in date-only check")
+                continue
+            }
+            
+            ; Check if this alarm has already triggered today
+            if (noteData.lastPlayDate = currentDate) {
+                Debug("Note " id " already triggered today, skipping")
+                continue
+            }
+            
+            ; Track if this note should be shown today
+            shouldShowToday := false
+            
+            ; Case 1: Note has a specific date
+            if (noteData.alarmDate) {
+                if (noteData.alarmDate = currentDate) {
+                    Debug("Note " id " alarmDate matches today!")
+                    shouldShowToday := true
+                } else {
+                    Debug("Note " id " alarmDate: " noteData.alarmDate " doesn't match today: " currentDate ", skipping")
+                }
+            }
+            ; Case 2: Note has weekday recurrence but no specific date
+            else if (noteData.alarmDays) {
+                if (InStr(noteData.alarmDays, shortDay)) {
+                    Debug("Note " id " weekday matches today!")
+                    shouldShowToday := true
+                } else {
+                    Debug("Note " id " weekday doesn't match today, skipping")
+                }
+            }
+            ; Case 3: Note has neither date nor weekday recurrence
+            else {
+                Debug("Note " id " has no date or weekday recurrence, skipping")
+                continue
+            }
+            
+            ; If note shouldn't be shown today, skip to next note
+            if (!shouldShowToday) {
+                continue
+            }
+            
+            ; For date-only alarms, we want them to show in the morning
+            if (!isMorningTime) {
+                Debug("Not morning time yet for note " id ", will check again later")
+                continue
+            }
+            
+            Debug("Found note " id " that should be visible today - current status: " 
+                (noteData.isHidden ? "hidden" : "visible"))
+            
+            ; If the note is hidden, create it and make it visible
+            if (noteData.isHidden) {
+                ; If note doesn't exist in memory, create it
+                if (!this.noteManager.notes.Has(id)) {
+                    Debug("Creating new note object for " id)
+                    try {
+                        newNote := Note(id, noteData)
+                        this.noteManager.notes[id] := newNote
+                        
+                        ; Show the note
+                        newNote.Show()
+                        Debug("Successfully showed previously hidden note " id)
+                        
+                        ; Update hidden status in storage
+                        storage.MarkNoteVisible(id)
+                    } catch Error as err {
+                        LogError("Error creating note " id ": " err.Message)
+                        continue
+                    }
+                } else {
+                    ; Note exists but is hidden, show it
+                    this.noteManager.notes[id].Show()
+                    Debug("Showed existing hidden note " id)
+                    
+                    ; Update hidden status in storage
+                    storage.MarkNoteVisible(id)
+                }
+            }
+            
+            ; If it's a one-time alarm without recurrence, remove it
+            ; Only do this for dated alarms with no weekday recurrence
+            if (noteData.alarmDate && !noteData.alarmDays) {
+                Debug("Removing one-time alarm for note " id)
+                
+                ; Update the note object if it exists
+                if (this.noteManager.notes.Has(id)) {
+                    this.noteManager.notes[id].hasAlarm := false
+                    this.noteManager.notes[id].alarmDate := ""
+                    
+                    ; Update button text if editor is open
+                    if (this.noteManager.notes[id].editor && this.noteManager.notes[id].editor.addAlarmBtn) {
+                        this.noteManager.notes[id].editor.addAlarmBtn.Text := "Add &Alarm..."
+                    }
+                }
+                
+                ; Also update the INI directly
+                IniWrite(0, OptionsConfig.INI_FILE, "Note-" id, "HasAlarm")
+                IniWrite("", OptionsConfig.INI_FILE, "Note-" id, "AlarmDate")
+            }
+            
+            ; Update last play date
+            if (this.noteManager.notes.Has(id)) {
+                this.noteManager.notes[id].lastPlayDate := currentDate
+            }
+            
+            ; Always update the INI file
+            IniWrite(currentDate, OptionsConfig.INI_FILE, "Note-" id, "LastPlayDate")
+            IniWrite(0, OptionsConfig.INI_FILE, "Note-" id, "Hidden")
+            
+            Debug("Updated lastPlayDate for note " id " to " currentDate " and marked as visible")
         }
     }
 
@@ -1870,6 +2093,10 @@ class NoteManager {
                     continue
                 }
             }
+            
+            ; Add this line at the end, after all notes are loaded
+            app.CheckDateOnlyAlarms()
+            
             return true
         } catch as err {
             LogError("Error in LoadSavedNotes: " err.Message)
@@ -2191,7 +2418,7 @@ class NoteStorage {
                 isHidden: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "Hidden", "0")),
                 hasBorder: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "HasBorder", OptionsConfig.DEFAULT_BORDER)),
                 hasAlarm: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "HasAlarm", "0")),
-                hasAlarmTime: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "HasAlarmTime", "1")),  ; Default to true for backward compatibility
+                hasAlarmTime: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "HasAlarmTime", "1")) = 1,
                 alarmTime: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmTime", ""),
                 alarmDate: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmDate", ""),
                 alarmSound: IniRead(OptionsConfig.INI_FILE, sectionName, "AlarmSound", ""),
@@ -3142,8 +3369,16 @@ class AlarmDialog {
     }
     
     SaveAlarm(*) {
-        ; Always reset cycle state when saving any alarm
-        app.ResetNoteAlarmCycle(this.note.id)
+        ; Instead of directly calling app.ResetNoteAlarmCycle,
+        ; check if StickyNotes.cycleComplete exists and access it directly
+        try {
+            ; Reset the cycle state if the app's cycleComplete exists
+            if (StickyNotes.HasOwnProp("cycleComplete") && StickyNotes.cycleComplete.Has(this.note.id)) {
+                StickyNotes.cycleComplete.Delete(this.note.id)
+            }
+        } catch as err {
+            LogError("Error resetting alarm cycle state: " err.Message)
+        }
         
         ; Update date
         this.note.alarmDate := this.selectedDate

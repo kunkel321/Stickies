@@ -6,7 +6,7 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    3-23-2025
+Version:    11-9-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -46,6 +46,7 @@ Features, Functionality, Usage, and Tips:
 - Display by visibility: Filter note list to show only hidden or visible, or all notes
 - Display by deletion: Filter note list to show only deleted or extant, or all notes
 - Deleted notes are identified by deletion time appearing in listview
+- Double-click note in main window listview to toggle show/hide
 - Access main window with Win+Shift+S (hidden by default)
 - Resize main window, by dragging edge/corner, to see more of note text in listview
 - Notes' show alarm times and window attachments in note manager listview
@@ -95,22 +96,26 @@ class OptionsConfig {
     static TOGGLE_MAIN_WINDOW    := "+#s"  ; Shift+Win+S. Shows/Hide Note Manager window.
     static NEW_NOTE              := "+#n"  ; Shift+Win+N. New note.
     static NEW_CLIPBOARD_NOTE    := "+#c"  ; Shift+Win+C. New note from text on clipboard.
-    static HIGHLIGHT_SEARCH      := "^f"    ; <---------- Not implemented yet
+    static SEARCH_BOX            := "^f"    ; Move cursor to search box.
     static APP_ICON              := "sticky.ico" ; Homemade icon that kunkel321 made.
     static INI_FILE              := "sticky_notes.ini" ; The note storage file. 
     static AUTO_OPEN_EDITOR      := true   ; Should Note Editor auto open upon note creation?    
-    static MAX_NOTE_WORDS        := 200    ; Maximum words in a clipboard note before truncating.
-    static MAX_NOTE_LINES        := 35     ; Maximum lines in a clipboard note before truncating.
+    static MAX_NOTE_WORDS        := 500    ; Maximum words in a clipboard note before truncating.
+    static MAX_NOTE_LINES        := 40     ; Maximum lines in a clipboard note before truncating.
     static CHECKBOX_MODIFIER_KEY := "Alt"  ; To prevent accidental checkbox clicks.  "" = don't require modifer.
     static DEFAULT_BORDER        := true   ; Whether new notes have borders by default.
     static CYCLE_FONT_COLOR      := true   ; Should new notes have colored font by default? False = black.
     static WARN_ON_DELETE_NOTE   := true   ; Whether to show confirmation before deleting notes (except multiple deletion).
     static DISABLE_TABLE_SORT    := true   ; When sorting note table in note manager, colors won't sort, so disabled.
+    static MANAGER_DEFAULT_WIDTH := 620
+    static MANAGER_DEFAULT_HEIGHT   := 500
+    static UNTIMED_ALARM_START_HOUR := 4   ; When untimed alarms begin to appear (24-hour format)
+    static UNTIMED_ALARM_END_HOUR   := 10  ; When untimed alarms stop appearing (24-hour format)
     ; Visual shake for alarms settings.
-    static DEFAULT_ALARM_SHAKE   := true    ; Whether new notes have borders by default.
+    static DEFAULT_ALARM_SHAKE   := true    ; Whether alarms shake by default.
     static SHAKE_STEPS           := 40      ; Number of shakes (40 takes about 3 seconds, depending on computer).
-    static MAX_SHAKE_DISTANCE    := 12      ; Maximum shake distance in pixels -- Start with this much shake.
-    static MIN_SHAKE_DISTANCE    := 0       ; Minimum shake distance in pixels -- Fade down to this much.
+    static MAX_SHAKE_DISTANCE    := 20      ; Maximum shake distance in pixels -- Start with this much shake.
+    static MIN_SHAKE_DISTANCE    := 5       ; Minimum shake distance in pixels -- Fade down to this much.
     ; Sticky note drag area settings.
     static RESERVE_DRAG_AREA     := false   ; Whether to reserve space at top for drag area.
     static DRAG_AREA_OFFSET      := 25      ; Y-offset of note text when reserving drag area.
@@ -119,7 +124,7 @@ class OptionsConfig {
     ; Winodws hidden from 'Select Window for Sticking' listbox... I never want to stick a note to these. 
     static BLACKLISTED_WINDOWS  := ["Sticky Notes", "Edit Note", "Set Alarm", "Select Window", "Rainmeter"] 
     ; Undelete settings.
-    static DAYS_DELETED_KEPT := 3           ; Number of days to keep deleted notes before purging.
+    static DAYS_DELETED_KEPT := 10          ; Number of days to keep deleted notes before purging.
     static DEFAULT_SHOW_DELETED := false    ; Whether to show deleted notes in listview by default.
 }
 
@@ -187,7 +192,7 @@ class StickyNotesConfig {
 ; Assumes that file is in grandparent folder of this file.
 ; ## NOTE ## that this won't affect the color of the notes. 
 ; It is for the dialogs. "Note font color" and this font color are different things. 
-settingsFile := A_ScriptDir "\..\colorThemeSettings.ini" 
+settingsFile := A_ScriptDir "\..\AutoCorrect2\Data\colorThemeSettings.ini" 
 If FileExist(SettingsFile) {  ; Get colors from ini file. 
     fontColor := IniRead(settingsFile, "ColorSettings", "fontColor")
     listColor := IniRead(settingsFile, "ColorSettings", "listColor")
@@ -246,7 +251,7 @@ class StickyNotes {
         HotKey(OptionsConfig.NEW_CLIPBOARD_NOTE, (*) => this.CreateClipboardNote())
             ; Set up context-sensitive hotkey for searching
         HotIfWinActive("ahk_id " this.mainWindow.gui.Hwnd)
-        HotKey(OptionsConfig.HIGHLIGHT_SEARCH, (*) => this.FocusSearchBox())
+        HotKey(OptionsConfig.SEARCH_BOX, (*) => this.FocusSearchBox())
         HotIf()
     }
     
@@ -428,7 +433,7 @@ class StickyNotes {
         shortDay := dayMap[currentDay]
         
         ; Check for morning time (for dateless alarms)
-        isMorningTime := (A_Hour >= 8 && A_Hour < 9)  ; Define "morning" as 8-9 AM
+        isMorningTime := (A_Hour >= OptionsConfig.UNTIMED_ALARM_START_HOUR && A_Hour <= OptionsConfig.UNTIMED_ALARM_END_HOUR)
         
         ; First collect notes with active alarms
         activeAlarms := []
@@ -741,9 +746,20 @@ class StickyNotes {
         )
         shortDay := dayMap[currentDay]
         
-        ; Check if it's morning time (considering a wider range for debugging)
-        isMorningTime := (A_Hour >= 6 && A_Hour < 10)
-        Debug("Morning time check: " isMorningTime " (Hour: " A_Hour ")")
+        ; Check if it's morning time (using configured hours)
+        isMorningTime := (A_Hour >= OptionsConfig.UNTIMED_ALARM_START_HOUR && A_Hour <= OptionsConfig.UNTIMED_ALARM_END_HOUR)
+        Debug("Morning time check: " isMorningTime " (Hour: " A_Hour ", Range: " OptionsConfig.UNTIMED_ALARM_START_HOUR "-" OptionsConfig.UNTIMED_ALARM_END_HOUR ")")
+
+        ; Validate time range on first run (add this near the top of the method)
+        static timeRangeValidated := false
+        if (!timeRangeValidated) {
+            if (OptionsConfig.UNTIMED_ALARM_START_HOUR >= OptionsConfig.UNTIMED_ALARM_END_HOUR) {
+                LogError("Warning: Untimed alarm start hour (" OptionsConfig.UNTIMED_ALARM_START_HOUR 
+                    ") is greater than or equal to end hour (" OptionsConfig.UNTIMED_ALARM_END_HOUR 
+                    "). Alarms may not appear as expected.")
+            }
+            timeRangeValidated := true
+        }
         
         ; Get all notes from INI file, including hidden ones
         storage := NoteStorage()
@@ -1436,6 +1452,7 @@ class Note {
         noteMenu := Menu()
         noteMenu.Add("Edit this Note", this.Edit.Bind(this))
         noteMenu.Add("Hide this Note", this.Hide.Bind(this))
+        noteMenu.Add("Hide all Notes", (*) => app.noteManager.HideAllNotes())
         noteMenu.Add("Delete this Note", this.Delete.Bind(this))
         noteMenu.Add()
         ; Add alarm-related items if note has an alarm
@@ -2211,6 +2228,18 @@ class NoteManager {
         } catch as err {
             MsgBox("Error restoring note " id ": " err.Message)
             return false
+        }
+    }
+    
+    HideAllNotes(*) {
+        try {
+            for id, note in this.notes {
+                note.Hide()
+            }
+            if (this.mainWindow)
+                this.mainWindow.PopulateNoteList()
+        } catch as err {
+            MsgBox("Error hiding all notes: " err.Message)
         }
     }
     
@@ -3618,6 +3647,11 @@ class MainWindow {
         spacing := 10   ; Space between buttons
         totalWidth := (buttonW * 3) + (spacing * 2)  ; Calculate total width for 3 columns
 
+        ; Set custom icon if file exists (must be done before creating the GUI)
+        if FileExist(OptionsConfig.APP_ICON) {
+            TraySetIcon(OptionsConfig.APP_ICON)
+        }
+        
         ; Create main window
         this.gui := Gui("+AlwaysOnTop +Resize +MinSize360x375", "Sticky Notes Manager")
         this.gui.BackColor := formColor
@@ -3710,7 +3744,7 @@ class MainWindow {
         this.CLV := LV_Colors(this.noteList)
 
         ;  handlers
-        this.noteList.OnEvent("DoubleClick", this.EditSelectedNote.Bind(this))
+        this.noteList.OnEvent("DoubleClick", this.ToggleSelectedNoteVisibility.Bind(this))
         this.noteList.OnEvent("ContextMenu", this.HandleClick.Bind(this))
 
         buttonY := "y+10"
@@ -3753,7 +3787,7 @@ class MainWindow {
             . "`t" FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) "`t = Show/Hide Window`n"
             . "`t" (OptionsConfig.CHECKBOX_MODIFIER_KEY? OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click`t`t = Toggle Checkbox in sticky note`n`n" : "`n")
             . "`t`t~~~Tips for Sticky Note Manager~~~`n"
-            . "Select list item, then double-click for editor.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, deleted, or undeleted.  Drag edge/corner of window to change its size. When deleted notes are shown, identify them by the date and time of deletion, in note text column.`n`n"
+            . "Select list item, then double-click to toggle show/hide.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, deleted, or undeleted.  Drag edge/corner of window to change its size. When deleted notes are shown, identify them by the date and time of deletion, in note text column.`n`n"
             . "`t`t~~~Tips for Sticky Notes~~~`n"
             . "The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area. Notes can be 'stuck to' certain windows.  Then they will disappear until the window is active again.  New notes will cycle in terms of position, note color, and font color.  Cycling font color can be turned off.  Note editor width will try to match with of note.  Right click note for context menu of commands.  Deleted notes are purged after X days.`n`n"
             . "`t`t~~~Tips for Alarms~~~`n"
@@ -3955,6 +3989,30 @@ class MainWindow {
         
         if app.noteManager.notes.Has(selectedIds[1])
             app.noteManager.notes[selectedIds[1]].Edit()
+    }
+    
+    ToggleSelectedNoteVisibility(*) {
+        selectedIds := this.GetSelectedNoteIds()
+        if (selectedIds.Length = 0)
+            return
+        
+        ; Handle single selection - toggle visibility
+        if (selectedIds.Length = 1) {
+            noteId := selectedIds[1]
+            storage := NoteStorage()
+            isHidden := Integer(IniRead(OptionsConfig.INI_FILE, "Note-" noteId, "Hidden", "0"))
+            
+            if (isHidden) {
+                ; Note is hidden, so unhide it
+                this.UnhideSelectedNote()
+            } else {
+                ; Note is visible, so hide it
+                this.HideSelectedNote()
+            }
+        } else {
+            ; For multiple selections, just open the first one in the editor
+            this.EditSelectedNote()
+        }
     }
 
     ShowSelectedNote(*) {
@@ -4266,7 +4324,7 @@ class MainWindow {
         this.PopulateNoteList()
         
         ; Show with explicit initial size instead of AutoSize
-        this.gui.Show("w440 h500 y50")
+        this.gui.Show("w" (OptionsConfig.MANAGER_DEFAULT_WIDTH) " h" (OptionsConfig.MANAGER_DEFAULT_HEIGHT) " y50")
         
         ; Focus the ListView by default
         this.noteList.Focus()

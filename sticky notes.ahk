@@ -1,12 +1,11 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
-; ^Esc::ExitApp ; hide
 /*
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    12-7-2025
+Version:    12-7-2025 take two.
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -16,11 +15,10 @@ Features, Functionality, Usage, and Tips:
 - Notes cascade from top-left of screen for better visibility
 - Cascading Positions: New note doesn't fully cover previous note
 - Notes cycle through different pastel background colors automatically
-- Note font color can optionally cycle too, or just use black
+- Note font color can optionally cycle too, or just use black.
 - Several formatting options including fonts, colors, sizing, and borders
-- Individual lines can be #bolded with a hashtag
 - Visual customization: Border thickness changes with bold text
-- Border color always matches font color 
+- Border color always matches font color. 
 - Stick notes to windows: Notes can be attached to specific application windows
 - Window persistence: Notes "stuck to" specific windows reappear when window reopens
 - Notes can be unstuck by clicking the window button again
@@ -65,7 +63,6 @@ Features, Functionality, Usage, and Tips:
 - Deleted notes are purged from ini file after 3 days (Configurable)
 - Checkbox Creation: Any text line starting with [] or [x] becomes an interactive checkbox
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
-- Header Creation: Any text line starting with # becomes bold
 - Hidden or deleted notes can be restored through main window or via note context menu
 - All note data saved to sticky_notes.ini in script directory
 - Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
@@ -77,7 +74,6 @@ Features, Functionality, Usage, and Tips:
 Known Issue:
 ------------
 - In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled. 
-- When making a single line of text #bold, the text doesn't wrap -- long text is cut-off.
 
 Development Note:
 -----------------
@@ -1353,17 +1349,19 @@ class Note {
     CreateComplexNote() {
         ; Initialize control array
         this.controls := []
-        currentY := OptionsConfig.RESERVE_DRAG_AREA ? OptionsConfig.DRAG_AREA_OFFSET : OptionsConfig.NO_RESERVE_OFFSET
         
         ; Parse content for checkboxes and bold headers
         parsed := this.ParseCheckboxContent()
         
-        ; Create controls
+        ; Create controls - let AutoHotkey stack them automatically
+        ; by NOT specifying y coordinates. This allows wrapped text to
+        ; properly affect the vertical positioning of subsequent controls.
         for item in parsed {
             if (item.type == "checkbox") {
                 ; Create checkbox with proper font color
+                ; No y positioning - let AutoHotkey stack automatically
                 cb := this.gui.Add("Checkbox",
-                    "y" currentY " x5 w" this.width " -wrap c" this.fontColor,  ; Add color directly in options
+                    "x5 w" this.width " -wrap c" this.fontColor,
                     item.text)
                 cb.Value := item.checked
                 
@@ -1383,11 +1381,11 @@ class Note {
                 ; Make checkbox interactive
                 cb.OnEvent("Click", this.SaveCheckboxState.Bind(this))
                 
-                currentY += 25
             } else if (item.type == "bold") {
                 ; Create bold header text control
+                ; No y positioning - let AutoHotkey stack automatically
                 txt := this.gui.Add("Text", 
-                    "y" currentY " x5 w" this.width " c" this.fontColor,  ; Add color directly in options
+                    "x5 w" this.width " c" this.fontColor,
                     item.text)
                 
                 ; Always bold for this type, plus any note-level bold setting
@@ -1400,11 +1398,11 @@ class Note {
                     text: item.text
                 })
                 
-                currentY += 20
             } else {
                 ; Create regular text with proper font color
+                ; No y positioning - let AutoHotkey stack automatically
                 txt := this.gui.Add("Text", 
-                    "y" currentY " x5 w" this.width " c" this.fontColor,  ; Add color directly in options
+                    "x5 w" this.width " c" this.fontColor,
                     item.text)
                 
                 ; Apply bold if needed
@@ -1418,8 +1416,6 @@ class Note {
                     type: "text",
                     text: item.text
                 })
-                
-                currentY += 20
             }
         }
     }
@@ -3922,7 +3918,7 @@ class MainWindow {
             . "`t`t~~~Tips for Sticky Note Manager~~~`n"
             . "Select list item, then double-click to toggle show/hide.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, deleted, or undeleted.  Drag edge/corner of window to change its size. When deleted notes are shown, identify them by the date and time of deletion, in note text column.`n`n"
             . "`t`t~~~Tips for Sticky Notes~~~`n"
-            . "The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area. Notes can be 'stuck to' certain windows.  Then they will disappear until the window is active again.  New notes will cycle in terms of position, note color, and font color.  Cycling font color can be turned off.  Note editor width will try to match with of note.  When typing note text, lines that start with [] are converted to checkboxes and lines that start with # are made bold.  If the entire note text is bold, then single-line bolding is moot.  Right click note for context menu of commands.  Deleted notes are purged after X days.`n`n"
+            . "The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area. Notes can be 'stuck to' certain windows.  Then they will disappear until the window is active again.  New notes will cycle in terms of position, note color, and font color.  Cycling font color can be turned off.  Note editor width will try to match with of note.  Right click note for context menu of commands.  Deleted notes are purged after X days.`n`n"
             . "`t`t~~~Tips for Alarms~~~`n"
             . "The code expects to find a subfolder-full of .wav files in its app folder.  Choose one for the alarm sound. If an alarm is playing, you can right-click the sticky note gui for a 'Stop Alarm' command. A single-occurence alarm will delete itself after playing.  Alarms that reoccur on weekdays never self-delete.  There is a visual shake option that makes note note 'shake' when its alarm activates.  On script start, a check is done for any missed alarms, and the user is notified if any are found.`n`n"
             . "`t`t`"We're all a little sticky on the inside...`"`n`t`t`tKunkel 2025"

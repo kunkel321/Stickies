@@ -13,10 +13,11 @@ Installation:
 
 Getting Started:
 ----------------
-* Find the "<> Code" droplist/button and download the ZIP file.
-* Right-click the ZIP file and choose "Extract".
+* Find the "<> Code" droplist/button on the GitHub page.
+* Expand the button to see the list of options, then download the ZIP file.
+* Right-click the downloaded ZIP file and choose "Extract".
 * Open the folder and double-click the "sticky notes.exe" file to run the app.
-* Do one of the Hotkey commands as seen below, or right-click a note for options. 
+* Do one of the Hotkey commands as seen below to make your own notes, or right-click a sample note for options. 
 
 Customizable Hotkeys:
 --------------------

@@ -1,12 +1,12 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
-^Esc::ExitApp
+; ^Esc::ExitApp ; hide
 /*
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    11-9-2025
+Version:    12-7-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies     
 
@@ -16,10 +16,11 @@ Features, Functionality, Usage, and Tips:
 - Notes cascade from top-left of screen for better visibility
 - Cascading Positions: New note doesn't fully cover previous note
 - Notes cycle through different pastel background colors automatically
-- Note font color can optionally cycle too, or just use black.
+- Note font color can optionally cycle too, or just use black
 - Several formatting options including fonts, colors, sizing, and borders
+- Individual lines can be #bolded with a hashtag
 - Visual customization: Border thickness changes with bold text
-- Border color always matches font color. 
+- Border color always matches font color 
 - Stick notes to windows: Notes can be attached to specific application windows
 - Window persistence: Notes "stuck to" specific windows reappear when window reopens
 - Notes can be unstuck by clicking the window button again
@@ -64,6 +65,7 @@ Features, Functionality, Usage, and Tips:
 - Deleted notes are purged from ini file after 3 days (Configurable)
 - Checkbox Creation: Any text line starting with [] or [x] becomes an interactive checkbox
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
+- Header Creation: Any text line starting with # becomes bold
 - Hidden or deleted notes can be restored through main window or via note context menu
 - All note data saved to sticky_notes.ini in script directory
 - Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
@@ -75,6 +77,7 @@ Features, Functionality, Usage, and Tips:
 Known Issue:
 ------------
 - In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled. 
+- When making a single line of text #bold, the text doesn't wrap -- long text is cut-off.
 
 Development Note:
 -----------------
@@ -224,6 +227,9 @@ class StickyNotes {
         SetTimer(this.CheckDateOnlyAlarms.Bind(this), 1000*60)
         ; Purge old deleted notes on startup
         (NoteStorage()).PurgeOldDeletedNotes()
+        
+        ; Handle system power events (sleep/wake)
+        OnMessage(0x0218, this.WM_POWERBROADCAST.Bind(this))
     }
     
     InitializeComponents() {
@@ -270,14 +276,76 @@ class StickyNotes {
         }
     }
     
+    WM_POWERBROADCAST(wParam, lParam, msg, hwnd) {
+        ; PBT_APMRESUMESUSPEND = 7 (system resuming from sleep/hibernation)
+        if (wParam = 7) {
+            try {
+                Debug("System woke from sleep, redrawing all notes...")
+                
+                ; Force redraw of all visible notes
+                for id, note in this.noteManager.notes {
+                    try {
+                        ; Check if note GUI exists and is valid
+                        if (note && note.gui && WinExist("ahk_id " note.gui.Hwnd)) {
+                            ; Redraw the main note GUI
+                            note.gui.Redraw()
+                            
+                            ; If note has a border, redraw that too
+                            if (note.borderGui && note.borderGui.Gui1) {
+                                note.borderGui.Gui1.Redraw()
+                            }
+                        }
+                    } catch as err {
+                        LogError("Error redrawing note " id ": " err.Message)
+                    }
+                }
+                
+                ; Also redraw main window if it exists
+                if (this.mainWindow && this.mainWindow.gui && WinExist("ahk_id " this.mainWindow.gui.Hwnd)) {
+                    this.mainWindow.gui.Redraw()
+                }
+            } catch as err {
+                LogError("Error in WM_POWERBROADCAST: " err.Message)
+            }
+        }
+    }
+    
     ProcessClipboardText() {
-        ; Check if clipboard has text
-        if (!A_Clipboard) {
-            MsgBox("No text found on clipboard.", "Sticky Notes", 48)
-            return ""
+        text := ""
+        retryCount := 0
+        maxRetries := 3
+        
+        ; Try to read clipboard with retry logic in case it's temporarily locked
+        loop {
+            try {
+                ; Attempt to read clipboard
+                text := A_Clipboard
+                
+                ; If we got text, break out of retry loop
+                if (text) {
+                    break
+                }
+                
+                retryCount++
+                if (retryCount >= maxRetries) {
+                    MsgBox("No text found on clipboard.", "Sticky Notes", 48)
+                    return ""
+                }
+                
+                ; Wait a bit before retrying (clipboard might be locked)
+                Sleep(50)
+                
+            } catch as err {
+                retryCount++
+                if (retryCount >= maxRetries) {
+                    LogError("Error reading clipboard: " err.Message)
+                    MsgBox("Failed to read clipboard: " err.Message, "Sticky Notes", 16)
+                    return ""
+                }
+                Sleep(50)
+            }
         }
 
-        text := A_Clipboard
         needsTruncation := false
         truncatedText := text
 
@@ -343,9 +411,34 @@ class StickyNotes {
     }
 
     CreateClipboardNote(*) {
-        ; Process clipboard text
+        ; Save the current clipboard content in case we need to restore it
+        oldClipboard := A_Clipboard
+        
+        ; Copy selected text from active window
+        A_Clipboard := ""  ; Clear clipboard to detect if copy succeeded
+        Send("^c")         ; Send Ctrl+C to copy selected text
+        Sleep(100)         ; Wait for clipboard to be populated
+        
+        ; Check if anything was copied
+        if (!A_Clipboard) {
+            ; Nothing was copied, restore old clipboard
+            A_Clipboard := oldClipboard
+            
+            ; Check if old clipboard had content
+            if (!oldClipboard) {
+                MsgBox("No text selected and clipboard is empty. Select text and try again, or use Shift+Win+N for a blank note.", "Sticky Notes", 48)
+            } else {
+                MsgBox("No text selected. Using text from clipboard instead.", "Sticky Notes", 64)
+                ; Fall through to use old clipboard content
+                A_Clipboard := oldClipboard
+            }
+        }
+        
+        ; Process clipboard text (this has its own retry logic)
         text := this.ProcessClipboardText()
         if (!text) {
+            ; Restore old clipboard before returning
+            A_Clipboard := oldClipboard
             return  ; No valid text to create note with
         }
 
@@ -365,6 +458,9 @@ class StickyNotes {
             isAutoSize: false,
         })
 
+        ; Restore original clipboard content after note is created
+        A_Clipboard := oldClipboard
+        
         ; Auto-open editor if enabled
         if (OptionsConfig.AUTO_OPEN_EDITOR && noteId) {
             this.noteManager.notes[noteId].Edit()
@@ -1199,7 +1295,7 @@ class Note {
         this.gui.SetFont("s" this.fontSize (this.isBold ? " bold" : ""), this.font)
         
         ; Create note content
-        if (InStr(this.content, "[]") || InStr(this.content, "[x]")) {
+        if (InStr(this.content, "[]") || InStr(this.content, "[x]") || InStr(this.content, "#")) {
             this.CreateComplexNote()
         } else {
             this.CreateSimpleNote()
@@ -1224,6 +1320,9 @@ class Note {
         ; Set up events
         this.SetupEvents()
         this.UpdatePosition()
+        
+        ; Register WM_ACTIVATE handler only once per note (not in SetupEvents)
+        OnMessage(0x0006, this.WM_ACTIVATE.Bind(this))
     }
 
     ; Helper method to get object keys
@@ -1256,7 +1355,7 @@ class Note {
         this.controls := []
         currentY := OptionsConfig.RESERVE_DRAG_AREA ? OptionsConfig.DRAG_AREA_OFFSET : OptionsConfig.NO_RESERVE_OFFSET
         
-        ; Parse content for checkboxes
+        ; Parse content for checkboxes and bold headers
         parsed := this.ParseCheckboxContent()
         
         ; Create controls
@@ -1285,8 +1384,25 @@ class Note {
                 cb.OnEvent("Click", this.SaveCheckboxState.Bind(this))
                 
                 currentY += 25
+            } else if (item.type == "bold") {
+                ; Create bold header text control
+                txt := this.gui.Add("Text", 
+                    "y" currentY " x5 w" this.width " c" this.fontColor,  ; Add color directly in options
+                    item.text)
+                
+                ; Always bold for this type, plus any note-level bold setting
+                txt.SetFont("bold" (this.isBold ? "" : ""))
+                
+                ; Store text control reference
+                this.controls.Push({
+                    control: txt,
+                    type: "bold",
+                    text: item.text
+                })
+                
+                currentY += 20
             } else {
-                ; Create text with proper font color
+                ; Create regular text with proper font color
                 txt := this.gui.Add("Text", 
                     "y" currentY " x5 w" this.width " c" this.fontColor,  ; Add color directly in options
                     item.text)
@@ -1322,6 +1438,20 @@ class Note {
                     text: ""
                 })
                 continue
+            }
+            
+            ; Check for bold header formatting (line starting with #)
+            if (SubStr(currentLine, 1, 1) = "#") {
+                headerText := SubStr(currentLine, 2)  ; Strip the # character
+                ; Only create bold header if there's text after the #
+                if (headerText != "") {
+                    parsed.Push({
+                        type: "bold",
+                        text: headerText,
+                        fullText: currentLine  ; Store complete line with # for reconstruction
+                    })
+                    continue
+                }
             }
             
             ; Check for checkbox formatting
@@ -1363,9 +1493,9 @@ class Note {
         
         ; double-click handlers both using "DblClick"
         this.dragArea.OnEvent("DoubleClick", this.DoubleClickHandler.Bind(this))
-
-        ; WM_ACTIVATE handler for saving position
-        OnMessage(0x0006, this.WM_ACTIVATE.Bind(this))
+        
+        ; Note: WM_ACTIVATE is registered only once in __New, not here
+        ; to avoid registering multiple global message handlers
     }
 
     DoubleClickHandler(*) {
@@ -1709,14 +1839,15 @@ class Note {
         this.gui.SetFont("s" this.fontSize (this.isBold ? " bold" : ""), this.font)
         
         ; Create note content
-        if (InStr(this.content, "[]") || InStr(this.content, "[x]")) {
+        if (InStr(this.content, "[]") || InStr(this.content, "[x]") || InStr(this.content, "#")) {
             this.CreateComplexNote()
         } else {
             this.CreateSimpleNote()
         }
         
-        ; First show the note GUI to establish its size
-        this.gui.Show(Format("x{} y{}", x, y))
+        ; Show the note GUI with NA (no activate) flag to prevent WM_ACTIVATE from firing
+        ; before BorderGui setup is complete - this reduces flickering
+        this.gui.Show(Format("x{} y{} NA", x, y))
         
         ; Then handle border if needed
         if (this.hasBorder) {
@@ -3041,6 +3172,9 @@ class NoteEditor {
     
     Save(*) {
         try {
+            ; Hide editor immediately for instant UI responsiveness
+            this.Hide()
+            
             ; Get current content
             newContent := this.editControl.Text
             
@@ -3075,17 +3209,15 @@ class NoteEditor {
             ; Save to storage
             (NoteStorage()).SaveNote(this.note)
             
-            ; Update main window ListView if it's visible
-            if WinExist("ahk_id " app.mainWindow.gui.Hwnd) {
-                app.mainWindow.PopulateNoteList()
-            }
-            
-            ; Destroy and recreate the editor with the new width if reopened
+            ; Destroy the editor GUI
             this.note.editor := ""
             this.gui.Destroy()
             
-            ; Hide editor 
-            this.Hide()
+            ; Defer ListView refresh to allow editor to close immediately
+            ; Only refresh if main window exists and is visible
+            if (WinExist("ahk_id " app.mainWindow.gui.Hwnd)) {
+                SetTimer((*) => app.mainWindow.PopulateNoteList(), -10)
+            }
         } catch Error as err {
             LogError("Error in NoteEditor.Save: " err.Message)
         }
@@ -3781,15 +3913,16 @@ class MainWindow {
     }
 
     ShowTips(*) {
-        helpText :=  "`t`t~~~Customizable Hotkeys~~~`n"
-            . "`t" FormatHotkeyForDisplay(OptionsConfig.NEW_NOTE) "`t = New Note`n"
-            . "`t" FormatHotkeyForDisplay(OptionsConfig.NEW_CLIPBOARD_NOTE) "`t = Clipboard Note`n"
-            . "`t" FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) "`t = Show/Hide Window`n"
-            . "`t" (OptionsConfig.CHECKBOX_MODIFIER_KEY? OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click`t`t = Toggle Checkbox in sticky note`n`n" : "`n")
+        helpText := "`t`t~~~Customizable Hotkeys~~~`n"
+            . "`t New Note:`t`t`t" FormatHotkeyForDisplay(OptionsConfig.NEW_NOTE) "`n"
+            . "`t Clipboard Note:`t`t`t" FormatHotkeyForDisplay(OptionsConfig.NEW_CLIPBOARD_NOTE) "`n"
+            . "`t Show/Hide Window:`t`t`t" FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) "`n"
+            .  (OptionsConfig.CHECKBOX_MODIFIER_KEY? "`t Toggle Checkbox in Note:`t`t" OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click`n" : "`n") "`n"
+            . "There are many more customizable settings near the top of the code.  See the comments for explanations.`n`n"
             . "`t`t~~~Tips for Sticky Note Manager~~~`n"
             . "Select list item, then double-click to toggle show/hide.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, deleted, or undeleted.  Drag edge/corner of window to change its size. When deleted notes are shown, identify them by the date and time of deletion, in note text column.`n`n"
             . "`t`t~~~Tips for Sticky Notes~~~`n"
-            . "The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area. Notes can be 'stuck to' certain windows.  Then they will disappear until the window is active again.  New notes will cycle in terms of position, note color, and font color.  Cycling font color can be turned off.  Note editor width will try to match with of note.  Right click note for context menu of commands.  Deleted notes are purged after X days.`n`n"
+            . "The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area. Notes can be 'stuck to' certain windows.  Then they will disappear until the window is active again.  New notes will cycle in terms of position, note color, and font color.  Cycling font color can be turned off.  Note editor width will try to match with of note.  When typing note text, lines that start with [] are converted to checkboxes and lines that start with # are made bold.  If the entire note text is bold, then single-line bolding is moot.  Right click note for context menu of commands.  Deleted notes are purged after X days.`n`n"
             . "`t`t~~~Tips for Alarms~~~`n"
             . "The code expects to find a subfolder-full of .wav files in its app folder.  Choose one for the alarm sound. If an alarm is playing, you can right-click the sticky note gui for a 'Stop Alarm' command. A single-occurence alarm will delete itself after playing.  Alarms that reoccur on weekdays never self-delete.  There is a visual shake option that makes note note 'shake' when its alarm activates.  On script start, a check is done for any missed alarms, and the user is notified if any are found.`n`n"
             . "`t`t`"We're all a little sticky on the inside...`"`n`t`t`tKunkel 2025"

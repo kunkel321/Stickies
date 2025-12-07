@@ -15,7 +15,7 @@ Getting Started:
 ----------------
 * Find the "<> Code" droplist/button and download the ZIP file.
 * Right-click the ZIP file and choose "Extract".
-* Open the folder and double-click the "stick notes.exe" file to run the app.
+* Open the folder and double-click the "sticky notes.exe" file to run the app.
 * Do one of the Hotkey commands as seen below, or right-click a note for options. 
 
 Customizable Hotkeys:

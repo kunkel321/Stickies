@@ -7,6 +7,17 @@
 * Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 * Repository: https://github.com/kunkel321/Stickies     
 
+Installation: 
+-------------
+* None.  This app is totally portable.
+
+Getting Started:
+----------------
+* Find the "<> Code" droplist/button and download the ZIP file.
+* Right-click the ZIP file and choose "Extract".
+* Open the folder and double-click the "stick notes.exe" file to run the app.
+* Do one of the Hotkey commands as seen below, or right-click a note for options. 
+
 Customizable Hotkeys:
 --------------------
 * Win+Shift+N - Create new note
@@ -66,6 +77,7 @@ Features, Functionality, Usage, and Tips:
 - Deleted notes are purged from ini file after 3 days (Configurable)
 - Checkbox Creation: Any text line starting with [] or [x] becomes an interactive checkbox
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
+- Header Creation: Any text line starting with # becomes bold
 - Hidden or deleted notes can be restored through main window or via note context menu
 - All note data saved to sticky_notes.ini in script directory
 - Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
@@ -74,9 +86,10 @@ Features, Functionality, Usage, and Tips:
 - System tray icon provides quick access to common functions
 - Start with Windows: Option available in tray menu
 
-Known Issue:
-------------
+Known Issues:
+-------------
 - In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled.
+- Please consider that bold text, and checkbox text, does not wrap -- Increase note width if needed.
 
 Development Note:
 -----------------
@@ -84,6 +97,9 @@ This script was developed primarily through AI-assisted coding, with Claude AI g
 include additional human-written code for enhanced features and bug fixes.. The system tray context menu has a few extra items, such as "Start with Windows."
 
 This script is unique because nearly every bit of code was created with AI prompts, then pasted into the ahk editor.  A great deal of human input was needed, but very little of the actual code was human-generated.  Edit: In later versions, more human code was added.
+
+As with all of my AutoHotkey projects, the exe file is not a compiled version of sticky notes.ahk.  Is mearly a copy of AutoHotkey.exe (v2, 64-bit) that has been renamed to match the ahk file.  This allows the app to be portable.  This way, users can open the 'sticky notes.ahk' file to change the settings (all the variable assignments near the top), then save the ahk file.  Then, double-clicking the 'sticky notes.exe' file will run the updated version.  The caveat is that both files (ahk and exe) have to be kept together.
+
 ![Screenshot of Sticky Notes tool](https://i.imgur.com/QtzJshJ.png)
 Screenshot explanation:
 1.	Sticky Note. The top/center of each note is a "drag area." Drag the drag area to move the note. Double-click the drag area to open the editor. Right-click the note for the context menu.  Size of drag area can be customized.  The top area of the note can be reserved. (It is not reserved in the image.)  The notes have optional borders to visually differentiate them.  Border color matches font color.

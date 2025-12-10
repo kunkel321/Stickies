@@ -101,7 +101,7 @@ This script is unique because nearly every bit of code was created with AI promp
 
 As with all of my AutoHotkey projects, the exe file is not a compiled version of sticky notes.ahk.  Is mearly a copy of AutoHotkey.exe (v2, 64-bit) that has been renamed to match the ahk file.  This allows the app to be portable.  This way, users can open the 'sticky notes.ahk' file to change the settings (all the variable assignments near the top), then save the ahk file.  Then, double-clicking the 'sticky notes.exe' file will run the updated version.  The caveat is that both files (ahk and exe) have to be kept together.
 
-![Screenshot of Sticky Notes tool](https://github.com/kunkel321/Stickies/blob/main/Screenshot%202025-12-09_13-11-39.jpg)
+![Screenshot of Sticky Notes tool](https://github.com/kunkel321/Stickies/blob/main/Screenshot%202025-12-09_657.jpg)
 Screenshot explanation:
 1.	Sticky Note. The top/center of each note is a "drag area." Drag the drag area to move the note. Double-click the drag area to open the editor. Right-click the note for the context menu.  Size of drag area can be customized.  The top area of the note can be reserved. (It is not reserved in the image.)  The notes have optional borders to visually differentiate them.  Border color matches font color.
 2.	 Alt+Click interactive checkbox items to toggle.  Checkboxes are typed into the note text by starting a new line with [] or [x].  Checkbox text doesn’t wrap.  Long items will override the note width setting. Headers are made bold by starting the line with #.

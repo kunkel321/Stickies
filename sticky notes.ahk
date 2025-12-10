@@ -5,9 +5,10 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    12-7-2025 take two.
+Version:    12-9-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
-Repository: https://github.com/kunkel321/Stickies     
+Repository: https://github.com/kunkel321/Stickies  
+Recommended: Get the repo from github. It has the .wav files and the homemade icon.   
 
 Features, Functionality, Usage, and Tips:
 -----------------------------------------
@@ -25,9 +26,10 @@ Features, Functionality, Usage, and Tips:
 - Alarm System: Set one-time or recurring alarms with custom sounds
 - Set alarms for individual notes with optional weekly recurrence
 - Many editor dialog options support accelerator keys (Alt+A for alarm, etc.)
-- Visual alert: Notes can shake when alarms trigger
+- Visual alert: Notes can shake when alarms trigger (customizable shake parameters)
 - Multiple alarm repeats: Choose between once, 3x, or 10x alarm repetitions
 - Alarm sounds: Custom alarm sounds can be added to the Sounds folder
+- WMP Com backup used for poorly formatted .wav files
 - Smart alarm management: System detects and reports missed alarms on startup
 - An alarm can have a: date and/or time and/or recurrence 
 - The logic for alarms is this: 
@@ -51,6 +53,7 @@ Features, Functionality, Usage, and Tips:
 - Notes' show alarm times and window attachments in note manager listview
 - Multiple selection: Use Ctrl+Click to select multiple notes in manager
 - Bulk operations: Select multiple notes to hide/unhide/delete/undelete simultaneously
+- Note Manager position/size/filtering saved to .ini file
 - Notes are created using Win+Shift+N or from clipboard with Win+Shift+C
 - Hotkeys and more can be changed near top of code
 - Tips button in note manager shows current hotkeys and other tips
@@ -63,6 +66,7 @@ Features, Functionality, Usage, and Tips:
 - Deleted notes are purged from ini file after 3 days (Configurable)
 - Checkbox Creation: Any text line starting with [] or [x] becomes an interactive checkbox
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
+- old Header Creation: Any text line starting with # becomes bolded (moot if entire note is bold)
 - Hidden or deleted notes can be restored through main window or via note context menu
 - All note data saved to sticky_notes.ini in script directory
 - Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
@@ -74,6 +78,7 @@ Features, Functionality, Usage, and Tips:
 Known Issue:
 ------------
 - In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled. 
+- Please consider that bold text, and checkbox text, does not wrap -- Increase note width if needed.
 
 Development Note:
 -----------------
@@ -112,9 +117,9 @@ class OptionsConfig {
     static UNTIMED_ALARM_END_HOUR   := 10  ; When untimed alarms stop appearing (24-hour format)
     ; Visual shake for alarms settings.
     static DEFAULT_ALARM_SHAKE   := true    ; Whether alarms shake by default.
-    static SHAKE_STEPS           := 40      ; Number of shakes (40 takes about 3 seconds, depending on computer).
-    static MAX_SHAKE_DISTANCE    := 20      ; Maximum shake distance in pixels -- Start with this much shake.
-    static MIN_SHAKE_DISTANCE    := 5       ; Minimum shake distance in pixels -- Fade down to this much.
+    static SHAKE_STEPS           := 80      ; Number of shakes (40 takes about 3 seconds, depending on computer).
+    static MAX_SHAKE_DISTANCE    := 40      ; Maximum shake distance in pixels -- Start with this much shake.
+    static MIN_SHAKE_DISTANCE    := 0       ; Minimum shake distance in pixels -- Fade down to this much.
     ; Sticky note drag area settings.
     static RESERVE_DRAG_AREA     := false   ; Whether to reserve space at top for drag area.
     static DRAG_AREA_OFFSET      := 25      ; Y-offset of note text when reserving drag area.
@@ -1350,6 +1355,10 @@ class Note {
         ; Initialize control array
         this.controls := []
         
+        ; Calculate offset for first control based on drag area setting
+        firstControlY := OptionsConfig.RESERVE_DRAG_AREA ? OptionsConfig.DRAG_AREA_OFFSET : OptionsConfig.NO_RESERVE_OFFSET
+        isFirstControl := true
+        
         ; Parse content for checkboxes and bold headers
         parsed := this.ParseCheckboxContent()
         
@@ -1359,9 +1368,10 @@ class Note {
         for item in parsed {
             if (item.type == "checkbox") {
                 ; Create checkbox with proper font color
-                ; No y positioning - let AutoHotkey stack automatically
+                ; Add y positioning only to first control to handle drag area offset
+                yOption := isFirstControl ? ("y" firstControlY " ") : ""
                 cb := this.gui.Add("Checkbox",
-                    "x5 w" this.width " -wrap c" this.fontColor,
+                    yOption "x5 w" this.width " -wrap c" this.fontColor,
                     item.text)
                 cb.Value := item.checked
                 
@@ -1381,11 +1391,14 @@ class Note {
                 ; Make checkbox interactive
                 cb.OnEvent("Click", this.SaveCheckboxState.Bind(this))
                 
+                isFirstControl := false
+                
             } else if (item.type == "bold") {
                 ; Create bold header text control
-                ; No y positioning - let AutoHotkey stack automatically
+                ; Add y positioning only to first control to handle drag area offset
+                yOption := isFirstControl ? ("y" firstControlY " ") : ""
                 txt := this.gui.Add("Text", 
-                    "x5 w" this.width " c" this.fontColor,
+                    yOption "x5 w" this.width " c" this.fontColor,
                     item.text)
                 
                 ; Always bold for this type, plus any note-level bold setting
@@ -1398,11 +1411,14 @@ class Note {
                     text: item.text
                 })
                 
+                isFirstControl := false
+                
             } else {
                 ; Create regular text with proper font color
-                ; No y positioning - let AutoHotkey stack automatically
+                ; Add y positioning only to first control to handle drag area offset
+                yOption := isFirstControl ? ("y" firstControlY " ") : ""
                 txt := this.gui.Add("Text", 
-                    "x5 w" this.width " c" this.fontColor,
+                    yOption "x5 w" this.width " c" this.fontColor,
                     item.text)
                 
                 ; Apply bold if needed
@@ -1416,6 +1432,8 @@ class Note {
                     type: "text",
                     text: item.text
                 })
+                
+                isFirstControl := false
             }
         }
     }
@@ -1682,11 +1700,23 @@ class Note {
                 this.ShakeNote()
             
             ; Play the alarm sound if specified
-            if (this.alarmSound && FileExist(this.alarmSound))
-                SoundPlay(this.alarmSound, 1)
+            if (this.alarmSound && FileExist(this.alarmSound)) {
+                try {
+                    SoundPlay(this.alarmSound, 1)
+                } catch Error as err {
+                    ; If SoundPlay fails, try Windows Media Player as fallback
+                    try {
+                        wmp := ComObject("WMPlayer.OCX.7")
+                        wmp.URL := this.alarmSound
+                        wmp.Controls.play()
+                    } catch {
+                        LogError("Failed to play alarm sound: " this.alarmSound)
+                    }
+                }
+            }
         }
 
-        ; Update lastPlayDate
+        ; Update lastPlayDate (this executes regardless of error or fallback)
         this.lastPlayDate := FormatTime(A_Now, "yyyyMMdd")
         ; Save to storage immediately
         storage := NoteStorage()
@@ -3505,13 +3535,32 @@ class AlarmDialog {
         selectedSound := this.soundDropDown.Text
         soundPath := AlarmConfig.ALARM_SOUNDS_FOLDER "\" selectedSound
         if FileExist(soundPath) {
+            soundPlayFailed := false
             try {
                 ; Set playing flag before attempting to play the sound
                 this.currentlyPlaying := true
                 SoundPlay(soundPath, 1)
             } catch as err {
                 this.currentlyPlaying := false
-                LogError("Error playing sound: " err.Message)
+                soundPlayFailed := true
+                
+                ; Try WMP fallback
+                try {
+                    this.currentWMP := ComObject("WMPlayer.OCX.7")  ; Store as property to prevent garbage collection
+                    this.currentWMP.URL := soundPath
+                    this.currentWMP.Controls.play()
+                } catch {
+                    LogError("Error playing sound: " err.Message)
+                }
+            }
+            
+            ; Show tooltip if fallback was used
+            if (soundPlayFailed) {
+                ToolTip("SoundPlay() failed. Using Windows Media Player fallback.`n`n" 
+                        . "Consider converting this WAV file to standard PCM format.")
+                SetTimer(() => ToolTip(), 4000)  ; Auto-dismiss after 4 seconds
+                ; Give WMP time to play the sound
+                Sleep(500)
             }
         } else {
             SoundBeep()
@@ -3765,9 +3814,123 @@ class MainWindow {
     hideWindowBtn := ""
     searchEdit := ""    ; Search box control
     botButtons := []
+    storage := ""      ; Storage for saving/loading notes
 
     __New() {
+        this.storage := NoteStorage()
         this.CreateGui()
+    }
+    
+    ; Load window position from INI, validating that it's on a connected monitor
+    LoadWindowPosition() {
+        savedX := IniRead(OptionsConfig.INI_FILE, "MainWindow", "X", "")
+        savedY := IniRead(OptionsConfig.INI_FILE, "MainWindow", "Y", "")
+        savedW := IniRead(OptionsConfig.INI_FILE, "MainWindow", "W", "")
+        savedH := IniRead(OptionsConfig.INI_FILE, "MainWindow", "H", "")
+        
+        ; Validate the position exists and is reasonable
+        if (savedX = "" || savedY = "" || savedW = "" || savedH = "") {
+            ; Use defaults
+            return {X: 50, Y: 50, W: OptionsConfig.MANAGER_DEFAULT_WIDTH, H: OptionsConfig.MANAGER_DEFAULT_HEIGHT}
+        }
+        
+        ; Check if position is within current monitor bounds
+        if (this.IsPositionValid(savedX, savedY)) {
+            return {X: savedX, Y: savedY, W: savedW, H: savedH}
+        } else {
+            ; Position is off-screen (external monitor not connected)
+            ; Reset to default on primary monitor
+            return {X: 50, Y: 50, W: OptionsConfig.MANAGER_DEFAULT_WIDTH, H: OptionsConfig.MANAGER_DEFAULT_HEIGHT}
+        }
+    }
+    
+    ; Check if position falls within any monitor's bounds
+    IsPositionValid(x, y) {
+        ; Get the count of connected monitors
+        monitorCount := MonitorGetCount()
+        if (monitorCount = 0)
+            return false
+        
+        ; Check if position falls within any monitor's bounds
+        Loop monitorCount {
+            MonitorGetWorkArea(A_Index, &left, &top, &right, &bottom)
+            if (x >= left && x < right && y >= top && y < bottom)
+                return true
+        }
+        
+        return false  ; Position is off all monitors
+    }
+    
+    ; Save current window position to INI
+    SaveWindowPosition() {
+        try {
+            this.gui.GetPos(&x, &y, &w, &h)
+            IniWrite(x, OptionsConfig.INI_FILE, "MainWindow", "X")
+            IniWrite(y, OptionsConfig.INI_FILE, "MainWindow", "Y")
+            IniWrite(w, OptionsConfig.INI_FILE, "MainWindow", "W")
+            IniWrite(h, OptionsConfig.INI_FILE, "MainWindow", "H")
+        } catch Error as err {
+            LogError("Failed to save window position: " err.Message)
+        }
+    }
+    
+    ; Save filter settings to INI
+    SaveFilterSettings() {
+        try {
+            ; Save visibility filter
+            if (this.filterHiddenOnly.Value)
+                IniWrite("Hidden", OptionsConfig.INI_FILE, "MainWindow", "VisibilityFilter")
+            else if (this.filterVisibleOnly.Value)
+                IniWrite("Visible", OptionsConfig.INI_FILE, "MainWindow", "VisibilityFilter")
+            else
+                IniWrite("All", OptionsConfig.INI_FILE, "MainWindow", "VisibilityFilter")
+            
+            ; Save deletion filter
+            if (this.filterDeletedOnly.Value)
+                IniWrite("Deleted", OptionsConfig.INI_FILE, "MainWindow", "DeletionFilter")
+            else if (this.filterNonDeletedOnly.Value)
+                IniWrite("Extant", OptionsConfig.INI_FILE, "MainWindow", "DeletionFilter")
+            else
+                IniWrite("All", OptionsConfig.INI_FILE, "MainWindow", "DeletionFilter")
+            
+            ; Save search text
+            IniWrite(this.searchEdit.Text, OptionsConfig.INI_FILE, "MainWindow", "SearchText")
+        } catch Error as err {
+            LogError("Failed to save filter settings: " err.Message)
+        }
+    }
+    
+    ; Load filter settings from INI
+    LoadFilterSettings() {
+        try {
+            ; Load visibility filter
+            visibilityFilter := IniRead(OptionsConfig.INI_FILE, "MainWindow", "VisibilityFilter", "All")
+            switch visibilityFilter {
+                case "Hidden":
+                    this.filterHiddenOnly.Value := 1
+                case "Visible":
+                    this.filterVisibleOnly.Value := 1
+                default:
+                    this.filterAllVisibility.Value := 1
+            }
+            
+            ; Load deletion filter
+            deletionFilter := IniRead(OptionsConfig.INI_FILE, "MainWindow", "DeletionFilter", "All")
+            switch deletionFilter {
+                case "Deleted":
+                    this.filterDeletedOnly.Value := 1
+                case "Extant":
+                    this.filterNonDeletedOnly.Value := 1
+                default:
+                    this.filterAllNotes.Value := 1
+            }
+            
+            ; Load search text
+            searchText := IniRead(OptionsConfig.INI_FILE, "MainWindow", "SearchText", "")
+            this.searchEdit.Text := searchText
+        } catch Error as err {
+            LogError("Failed to load filter settings: " err.Message)
+        }
     }
     
     CreateGui() {
@@ -3805,24 +3968,17 @@ class MainWindow {
         tempBtn.OnEvent("Click", (*) => app.CreateNewNote())
         this.topButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h25", "From Clpbrd")
-        tempBtn.OnEvent("Click", (*) => app.CreateClipboardNote())
-        this.topButtons.push(tempBtn)
-
-        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h25", "Re&Load Notes")
+        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h25", "Re&Load Notes")
         tempBtn.OnEvent("Click", (*) => app.noteManager.LoadSavedNotes())
         this.topButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h25", "&Hide App")
-        tempBtn.OnEvent("Click", (*) => this.Hide())
-        this.topButtons.push(tempBtn)
-
-        tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h25", "Save Status")
+        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h25", "Save &Status")
         tempBtn.OnEvent("Click", (*) => app.noteManager.SaveAllNotes())
         this.topButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h25", "Exit App")
-        tempBtn.OnEvent("Click", (*) => this.ExitApp())
+        ; Second row - Hide App button (full width)
+        tempBtn := this.gui.Add("Button", "x10 y+5 w" totalWidth " h40", "&Hide App")
+        tempBtn.OnEvent("Click", (*) => this.Hide())
         this.topButtons.push(tempBtn)
 
         ; First group - radio buttons for note visibility status
@@ -3847,16 +4003,16 @@ class MainWindow {
 
         ; Search box
         this.gui.Add("Text", "x10 y+18", "Search:")
-        this.searchEdit := this.gui.Add("Edit", "x+25 yp-3 w220", "")
+        this.searchEdit := this.gui.Add("Edit", "x+10 yp-3 w235", "")
 
         ; Add filter events
-        this.filterAllVisibility.OnEvent("Click", (*) => this.PopulateNoteList())
-        this.filterHiddenOnly.OnEvent("Click", (*) => this.PopulateNoteList())
-        this.filterVisibleOnly.OnEvent("Click", (*) => this.PopulateNoteList())
-        this.filterAllNotes.OnEvent("Click", (*) => this.PopulateNoteList())
-        this.filterDeletedOnly.OnEvent("Click", (*) => this.PopulateNoteList())
-        this.filterNonDeletedOnly.OnEvent("Click", (*) => this.PopulateNoteList())
-        this.searchEdit.OnEvent("Change", (*) => this.PopulateNoteList())
+        this.filterAllVisibility.OnEvent("Click", (*) => (this.PopulateNoteList(), this.SaveFilterSettings()))
+        this.filterHiddenOnly.OnEvent("Click", (*) => (this.PopulateNoteList(), this.SaveFilterSettings()))
+        this.filterVisibleOnly.OnEvent("Click", (*) => (this.PopulateNoteList(), this.SaveFilterSettings()))
+        this.filterAllNotes.OnEvent("Click", (*) => (this.PopulateNoteList(), this.SaveFilterSettings()))
+        this.filterDeletedOnly.OnEvent("Click", (*) => (this.PopulateNoteList(), this.SaveFilterSettings()))
+        this.filterNonDeletedOnly.OnEvent("Click", (*) => (this.PopulateNoteList(), this.SaveFilterSettings()))
+        this.searchEdit.OnEvent("Change", (*) => (this.PopulateNoteList(), this.SaveFilterSettings()))
 
         ; Create ListView with columns
         this.noteList := this.gui.Add("ListView", 
@@ -3864,7 +4020,7 @@ class MainWindow {
             ["Created", "Delete Time|Note Contents", "Alarm|Window"])
 
         ; Set column widths
-        this.noteList.ModifyCol(1, 24)
+        this.noteList.ModifyCol(1, 85)  ; Wide enough for yy-mm-dd
         this.noteList.ModifyCol(2, totalWidth * 0.80) 
         this.noteList.ModifyCol(3, totalWidth * 0.35)
 
@@ -3905,7 +4061,7 @@ class MainWindow {
         ; Set up events
         this.gui.OnEvent("Close", (*) => this.Hide())
         this.gui.OnEvent("Escape", (*) => this.Hide())
-        this.gui.OnEvent("Size", (*) => this.ResizeControls())
+        this.gui.OnEvent("Size", (*) => (this.ResizeControls(), this.SaveWindowPosition()))
     }
 
     ShowTips(*) {
@@ -3965,7 +4121,7 @@ class MainWindow {
                 continue  ; Skip hidden notes when "Visible Only" is selected
             }
                 
-            if (searchText && !InStr(noteData.content, searchText, true))
+            if (searchText && !InStr(noteData.content, searchText, false))
                 continue
 
             if (RegExMatch(noteData.id, "(\d{4})(\d{2})(\d{2})", &match))
@@ -3973,19 +4129,14 @@ class MainWindow {
             else
                 creationDate := ""
                 
-            ; Format the content column differently for deleted notes
+            ; Format the content column - let ListView handle truncation naturally
             preview := ""
             ; Get deletion time directly from INI to ensure we catch all deleted notes
             deletedTime := IniRead(OptionsConfig.INI_FILE, "Note-" noteData.id, "DeletedTime", "")
             if (deletedTime != "") {
-                preview := FormatTime(deletedTime, "MM-dd HH:mm") " | " 
-                preview .= StrLen(noteData.content) > 80  ; Slightly shorter for deleted notes to make room for timestamp
-                    ? SubStr(noteData.content, 1, 77) "..."
-                    : noteData.content
+                preview := FormatTime(deletedTime, "MM-dd HH:mm") " | " noteData.content
             } else {
-                preview := StrLen(noteData.content) > 100 
-                    ? SubStr(noteData.content, 1, 97) "..."
-                    : noteData.content
+                preview := noteData.content
             }
                 
             ; Build combined alarm/window info
@@ -4012,13 +4163,9 @@ class MainWindow {
 
             ; Add window info if present
             if (noteData.isStuckToWindow && noteData.stuckWindowTitle) {
-                windowInfo := StrLen(noteData.stuckWindowTitle) > 30 
-                    ? SubStr(noteData.stuckWindowTitle, 1, 27) "..."
-                    : noteData.stuckWindowTitle
-                    
                 combinedInfo := combinedInfo 
-                    ? combinedInfo "|" windowInfo  ; Add window info with separator if there's already alarm info
-                    : windowInfo                   ; Just window info if no alarm
+                    ? combinedInfo "|" noteData.stuckWindowTitle  ; Add window info with separator if there's already alarm info
+                    : noteData.stuckWindowTitle                   ; Just window info if no alarm
             }
             
             rowNum := this.noteList.Add(, creationDate, preview, combinedInfo, "")
@@ -4383,7 +4530,7 @@ class MainWindow {
             
             ; Update bottom button Y positions
             buttonY := lvY + newLVHeight + 10  ; 10px spacing after ListView
-            this.noteList.ModifyCol(1, 24)
+            this.noteList.ModifyCol(1, 85)  ; Wide enough for yy-mm-dd
             this.noteList.ModifyCol(2, Integer(fullWidth * 0.75))
             this.noteList.ModifyCol(3, Integer(fullWidth * 0.35))
             
@@ -4405,21 +4552,19 @@ class MainWindow {
             }
             
             ; Update top buttons - using only integer positions and sizes
-            if (this.topButtons.Length >= 6) {
+            if (this.topButtons.Length >= 4) {
                 ; Calculate button positions for perfect fit
                 leftX := 10
                 midX := leftX + buttonW + spacing
                 rightX := leftX + (buttonW * 2) + (spacing * 2)
                 
-                ; First row
+                ; First row (3 buttons)
                 this.topButtons[1].Move(leftX, , buttonW)
                 this.topButtons[2].Move(midX, , buttonW)
                 this.topButtons[3].Move(rightX, , buttonW)
                 
-                ; Second row
-                this.topButtons[4].Move(leftX, , buttonW)
-                this.topButtons[5].Move(midX, , buttonW)
-                this.topButtons[6].Move(rightX, , buttonW)
+                ; Second row (full-width Hide App button)
+                this.topButtons[4].Move(leftX, , fullWidth)
             }
             
             ; Update bottom buttons
@@ -4449,17 +4594,25 @@ class MainWindow {
     }
 
     Show(*) {
-        ; Populate before showing
-        this.PopulateNoteList()
+        ; Load saved position, or use defaults if not available/valid
+        pos := this.LoadWindowPosition()
         
-        ; Show with explicit initial size instead of AutoSize
-        this.gui.Show("w" (OptionsConfig.MANAGER_DEFAULT_WIDTH) " h" (OptionsConfig.MANAGER_DEFAULT_HEIGHT) " y50")
+        ; Show with saved position and size
+        this.gui.Show("x" pos.X " y" pos.Y " w" pos.W " h" pos.H)
+        
+        ; Load filter settings after showing (so controls exist)
+        this.LoadFilterSettings()
+        
+        ; Populate with loaded filter settings
+        this.PopulateNoteList()
         
         ; Focus the ListView by default
         this.noteList.Focus()
     }
     
     Hide(*) {
+        this.SaveFilterSettings()
+        this.SaveWindowPosition()
         this.gui.Hide()
     }
     
@@ -4468,6 +4621,8 @@ class MainWindow {
     }
     
     ExitApp(*) {
+        this.SaveFilterSettings()
+        this.SaveWindowPosition()
         ; Save all notes and clean up using the noteManager
         app.noteManager.SaveAllNotes()
         

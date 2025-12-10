@@ -111,7 +111,7 @@ Screenshot explanation:
 6.	Sticky Note context menu.  When a note is alarmed, additional items (‘Stop’, ‘Delete Alarm’) are added to the menu.  The “Show Hidden” and the “Undelete a note” items popup a submenu of the hidden or deleted items.  Deleted items get purged from the ini settings file after X days.
 7.	Submenu showing hidden items.  Choose an item to unhide it.  Or double-click item in Manager listview.
 8.	Submenu showing recently deleted items.  Choose one to undelete, or choose multiple from the Note Manager list. 
-9.  Apparently I accidentally clicked the desktop.
+9.  Number nine?
 10.	Sticky Notes Manager gui form. It is hidden by default. Default hotkey to show it is Win+Shift+S.  Size and position of Note Manager is saved in .ini file.
 11.  Click the `Tips` button for list of hotkeys and other tips.
 12.	The buttons on the top are for mostly ‘app-level’ commands.

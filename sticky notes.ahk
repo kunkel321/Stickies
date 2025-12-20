@@ -2,13 +2,33 @@
 #SingleInstance Force
 
 /*
-Project:    Sticky Notes
-Author:     kunkel321
-Tool used:  Claude AI
-Version:    12-20-2025
-Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
-Repository: https://github.com/kunkel321/Stickies  
-Recommended: Get the repo from github. It has the .wav files and the homemade icon.   
+# Sticky Notes
+* Project:    Sticky Notes
+* Author:     kunkel321
+* Tool used:  Claude AI
+* Version:    12-20-2025
+* Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
+* Repository: https://github.com/kunkel321/Stickies     
+
+Installation: 
+-------------
+* None.  This app is totally portable.  Just kill the app and delete the folder to get rid of it.
+* However:  There is an option to 'Start with Windows.'  This will put a link in your Startup folder. If you later want to get rid of the app, uncheck this option first, so the link is removed. 
+
+Getting Started (Beginniner):
+----------------
+* Find the "<> Code" droplist/button on the GitHub page.
+* Expand the button to see the list of options, then download the ZIP file.
+* Right-click the downloaded ZIP file and choose "Extract".
+* Open the folder and double-click the "sticky notes.exe" file to run the app.
+* Do one of the Hotkey commands as seen below to make your own notes, or right-click a sample note for options.
+* Read the Tips for tips and check out the user configuration section near the top of the code.
+
+Customizable Hotkeys:
+--------------------
+* Win+Shift+N - Create new note
+* Win+Shift+C - Create new note from clipboard text
+* Win+Shift+S - Toggle main window visibility
 
 Features, Functionality, Usage, and Tips:
 -----------------------------------------
@@ -26,47 +46,45 @@ Features, Functionality, Usage, and Tips:
 - Alarm System: Set one-time or recurring alarms with custom sounds
 - Set alarms for individual notes with optional weekly recurrence
 - Many editor dialog options support accelerator keys (Alt+A for alarm, etc.)
-- Visual alert: Notes can shake when alarms trigger (customizable shake parameters)
+- Visual alert: Notes can shake when alarms trigger
 - Multiple alarm repeats: Choose between once, 3x, or 10x alarm repetitions
 - Alarm sounds: Custom alarm sounds can be added to the Sounds folder
-- WMP Com backup used for poorly formatted .wav files
 - Smart alarm management: System detects and reports missed alarms on startup
 - An alarm can have a: date and/or time and/or recurrence 
-- The logic for alarms is this: 
--- Date + time + no weekly recurrence: plays once on given date, then deletes itself
--- Date + no time + no weekly recurrence: note appears in morning on date with no sound/shake, then alarm deletes
--- Date + time + weekly recurrence: plays on given date, doesn't delete itself, plays again on recurring days
--- Date + no time + weekly recurrence: note appears in morning on date, doesn't delete, reappears on recurring days
--- No date + no time + weekly recurrence: note appears in morning on recurring weekdays
--- No date + time + no weekly recurrence: plays at specified time
--- No date + time + weekly recurrence: plays at specified time on recurring days
+- The logic for alarms is this:
+- > Date + time + no weekly recurrence: plays once on given date, then deletes itself
+- > Date + no time + no weekly recurrence: note appears in morning on date with no sound/shake, then alarm deletes
+- > Date + time + weekly recurrence: plays on given date, doesn't delete itself, plays again on recurring days
+- > Date + no time + weekly recurrence: note appears in morning on date, doesn't delete, reappears on recurring days
+- > No date + no time + weekly recurrence: note appears in morning on recurring weekdays
+- > No date + time + no weekly recurrence: plays at specified time
+- > No date + time + weekly recurrence: plays at specified time on recurring days
 - Main window with note management, preview, and search functionality
 - Color-coded notes: Notes maintain their color scheme in preview list
 - Rich preview: Right-click notes in manager for formatted preview with original fonts/colors
 - Search functionality: Filter notes by content in main window
-- Display by visibility: Filter note list to show only hidden or visible, or all notes
-- Display by deletion: Filter note list to show only deleted or extant, or all notes
+- Selective display: Filter note list to show only hidden or visible notes
+- Include recently deleted note in hidden/visible listview filter
 - Deleted notes are identified by deletion time appearing in listview
-- Double-click note in main window listview to toggle show/hide
 - Access main window with Win+Shift+S (hidden by default)
 - Resize main window, by dragging edge/corner, to see more of note text in listview
 - Notes' show alarm times and window attachments in note manager listview
 - Multiple selection: Use Ctrl+Click to select multiple notes in manager
 - Bulk operations: Select multiple notes to hide/unhide/delete/undelete simultaneously
-- Note Manager position/size/filtering saved to .ini file
 - Notes are created using Win+Shift+N or from clipboard with Win+Shift+C
 - Hotkeys and more can be changed near top of code
 - Tips button in note manager shows current hotkeys and other tips
+- [ ] Pin checkbox indicates if window is "Always on Top"
 - Double-click top bar or right-click for editing options
 - Drag notes by their top bar to reposition
 - Configurable drag area: Option to maximize note space by minimizing drag area
-- Notes auto-save position when moved
+- Notes auto-save position of note when moved
 - Turn off note deletion warning
 - Undelete notes
 - Deleted notes are purged from ini file after 3 days (Configurable)
 - Checkbox Creation: Any text line starting with [] or [x] becomes an interactive checkbox
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
-- old Header Creation: Any text line starting with # becomes bolded (moot if entire note is bold)
+- Header Creation: Any text line starting with # becomes bold
 - Hidden or deleted notes can be restored through main window or via note context menu
 - All note data saved to sticky_notes.ini in script directory
 - Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
@@ -77,17 +95,15 @@ Features, Functionality, Usage, and Tips:
 
 Known Issues:
 -------------
-- In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled. 
+- In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled.
 - Please consider that bold text, and checkbox text, does not wrap -- Increase note width if needed.
-- The 'New Note from Clipboard' might not work if Sticky Notes.exe is not running as admin.
 
 Development Note:
 -----------------
-This script was developed primarily through AI-assisted coding, with Claude AI 
-generating most of the base code structure and functionality. Later versions 
-include additional human-written code for enhanced features and bug fixes.
-Thanks go to the humans, Hellbent for his borderGui class, and 
-Justme for his ToolTipOptions and LV_Colors classes. 
+This script was developed primarily through AI-assisted coding, with Claude AI generating most of the base code structure and functionality. Later versions 
+include additional human-written code for enhanced features and bug fixes.. The system tray context menu has a few extra items, such as "Start with Windows."
+
+This script is unique because nearly every bit of code was created with AI prompts, then pasted into the ahk editor.  A great deal of human input was needed, but very little of the actual code was human-generated.  Edit: In later versions, more human code was added.
 */
 
 ; #+N:: Create new note

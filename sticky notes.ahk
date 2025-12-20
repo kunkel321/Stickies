@@ -5,7 +5,7 @@
 Project:    Sticky Notes
 Author:     kunkel321
 Tool used:  Claude AI
-Version:    12-9-2025
+Version:    12-20-2025
 Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 Repository: https://github.com/kunkel321/Stickies  
 Recommended: Get the repo from github. It has the .wav files and the homemade icon.   
@@ -75,10 +75,11 @@ Features, Functionality, Usage, and Tips:
 - System tray icon provides quick access to common functions
 - Start with Windows: Option available in tray menu
 
-Known Issue:
-------------
+Known Issues:
+-------------
 - In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled. 
 - Please consider that bold text, and checkbox text, does not wrap -- Increase note width if needed.
+- The 'New Note from Clipboard' might not work if Sticky Notes.exe is not running as admin.
 
 Development Note:
 -----------------
@@ -96,7 +97,7 @@ Justme for his ToolTipOptions and LV_Colors classes.
 ; Hotkeys and other Configuration.  Change if desired.
 class OptionsConfig {
     static DEBUG_LOG             := 0      ; Mostly for AI feedback.  Recommend setting 'false.'      
-    static ERROR_LOG             := 1      ; Mostly for AI feedback.  Recommend setting 'false.'      
+    static ERROR_LOG             := 0      ; Mostly for AI feedback.  Recommend setting 'false.'      
     static TOGGLE_MAIN_WINDOW    := "+#s"  ; Shift+Win+S. Shows/Hide Note Manager window.
     static NEW_NOTE              := "+#n"  ; Shift+Win+N. New note.
     static NEW_CLIPBOARD_NOTE    := "+#c"  ; Shift+Win+C. New note from text on clipboard.
@@ -111,7 +112,7 @@ class OptionsConfig {
     static CYCLE_FONT_COLOR      := true   ; Should new notes have colored font by default? False = black.
     static WARN_ON_DELETE_NOTE   := true   ; Whether to show confirmation before deleting notes (except multiple deletion).
     static DISABLE_TABLE_SORT    := true   ; When sorting note table in note manager, colors won't sort, so disabled.
-    static MANAGER_DEFAULT_WIDTH := 620
+    static MANAGER_DEFAULT_WIDTH := 720
     static MANAGER_DEFAULT_HEIGHT   := 500
     static UNTIMED_ALARM_START_HOUR := 4   ; When untimed alarms begin to appear (24-hour format)
     static UNTIMED_ALARM_END_HOUR   := 10  ; When untimed alarms stop appearing (24-hour format)
@@ -3809,6 +3810,7 @@ class MainWindow {
     filterHidden := ""  ; Checkbox control
     filterVisible := "" ; Checkbox control
     tipsBtn := ""
+    pinCheckbox := ""  ; Checkbox to toggle always-on-top
     separators := []
     topButtons := []
     hideWindowBtn := ""
@@ -3821,56 +3823,42 @@ class MainWindow {
         this.CreateGui()
     }
     
-    ; Load window position from INI, validating that it's on a connected monitor
+    ; Load window size from INI (position always defaults to 50,50 on primary monitor)
     LoadWindowPosition() {
-        savedX := IniRead(OptionsConfig.INI_FILE, "MainWindow", "X", "")
-        savedY := IniRead(OptionsConfig.INI_FILE, "MainWindow", "Y", "")
         savedW := IniRead(OptionsConfig.INI_FILE, "MainWindow", "W", "")
         savedH := IniRead(OptionsConfig.INI_FILE, "MainWindow", "H", "")
         
-        ; Validate the position exists and is reasonable
-        if (savedX = "" || savedY = "" || savedW = "" || savedH = "") {
-            ; Use defaults
-            return {X: 50, Y: 50, W: OptionsConfig.MANAGER_DEFAULT_WIDTH, H: OptionsConfig.MANAGER_DEFAULT_HEIGHT}
+        ; If saved size exists, use it; otherwise use defaults
+        if (savedW = "" || savedH = "") {
+            return {W: OptionsConfig.MANAGER_DEFAULT_WIDTH, H: OptionsConfig.MANAGER_DEFAULT_HEIGHT}
         }
         
-        ; Check if position is within current monitor bounds
-        if (this.IsPositionValid(savedX, savedY)) {
-            return {X: savedX, Y: savedY, W: savedW, H: savedH}
-        } else {
-            ; Position is off-screen (external monitor not connected)
-            ; Reset to default on primary monitor
-            return {X: 50, Y: 50, W: OptionsConfig.MANAGER_DEFAULT_WIDTH, H: OptionsConfig.MANAGER_DEFAULT_HEIGHT}
-        }
+        savedW := Integer(savedW)
+        savedH := Integer(savedH)
+        
+        return {W: savedW, H: savedH}
     }
     
-    ; Check if position falls within any monitor's bounds
-    IsPositionValid(x, y) {
-        ; Get the count of connected monitors
-        monitorCount := MonitorGetCount()
-        if (monitorCount = 0)
-            return false
-        
-        ; Check if position falls within any monitor's bounds
-        Loop monitorCount {
-            MonitorGetWorkArea(A_Index, &left, &top, &right, &bottom)
-            if (x >= left && x < right && y >= top && y < bottom)
-                return true
-        }
-        
-        return false  ; Position is off all monitors
-    }
-    
-    ; Save current window position to INI
+    ; Save current window size to INI (position always defaults to 50,50 on primary monitor)
     SaveWindowPosition() {
         try {
             this.gui.GetPos(&x, &y, &w, &h)
-            IniWrite(x, OptionsConfig.INI_FILE, "MainWindow", "X")
-            IniWrite(y, OptionsConfig.INI_FILE, "MainWindow", "Y")
+            
+            ; Don't save if window is at 0,0 (off-screen)
+            if (x = 0 && y = 0) {
+                return
+            }
+            
+            ; Don't save if window is on secondary monitor (x > 1500)
+            if (x > 1500) {
+                return
+            }
+            
+            ; Save width and height only
             IniWrite(w, OptionsConfig.INI_FILE, "MainWindow", "W")
             IniWrite(h, OptionsConfig.INI_FILE, "MainWindow", "H")
         } catch Error as err {
-            LogError("Failed to save window position: " err.Message)
+            LogError("Failed to save window size: " err.Message)
         }
     }
     
@@ -3957,6 +3945,8 @@ class MainWindow {
         this.gui.SetFont("c" fontColor)
         this.titleText := this.gui.Add("Text", "x57 y10", "Sticky Notes Manager")
         this.gui.setFont("norm s" TextFont)
+        this.pinCheckbox := this.gui.Add("Checkbox", "x" (totalWidth - 100) " y13 Checked", "Pin")
+        this.pinCheckbox.OnEvent("Click", (*) => this.TogglePinned())
         this.tipsBtn := this.gui.Add("Button", "x" (totalWidth - 45) " y10 h25 w40", "Tips")
         this.tipsBtn.OnEvent("Click", (*) => this.ShowTips())
         
@@ -4505,7 +4495,10 @@ class MainWindow {
             spacing := 10
             fullWidth := clientWidth - 20  ; Width for full-width elements
 
-            ; Position Tips button once
+            ; Position Pin checkbox and Tips button
+            if (this.pinCheckbox) {
+                this.pinCheckbox.Move(fullWidth - 81)
+            }
             if (this.tipsBtn) {
                 this.tipsBtn.Move(fullWidth - 31) 
             }
@@ -4594,11 +4587,11 @@ class MainWindow {
     }
 
     Show(*) {
-        ; Load saved position, or use defaults if not available/valid
+        ; Load saved size, or use defaults
         pos := this.LoadWindowPosition()
         
-        ; Show with saved position and size
-        this.gui.Show("x" pos.X " y" pos.Y " w" pos.W " h" pos.H)
+        ; Always show on primary monitor at a sensible default location
+        this.gui.Show("x50 y50 w" pos.W " h" pos.H)
         
         ; Load filter settings after showing (so controls exist)
         this.LoadFilterSettings()
@@ -4614,6 +4607,16 @@ class MainWindow {
         this.SaveFilterSettings()
         this.SaveWindowPosition()
         this.gui.Hide()
+    }
+    
+    TogglePinned(*) {
+        if (this.pinCheckbox.Value) {
+            ; Pin the window (always on top)
+            this.gui.Opt("+AlwaysOnTop")
+        } else {
+            ; Unpin the window (normal behavior)
+            this.gui.Opt("-AlwaysOnTop")
+        }
     }
     
     Destroy(*) {

@@ -9,15 +9,17 @@
 
 Installation: 
 -------------
-* None.  This app is totally portable.
+* None.  This app is totally portable.  Just kill the app and delete the folder to get rid of it.
+* However:  There is an option to 'Start with Windows.'  This will put a link in your Startup folder. If you later want to get rid of the app, uncheck this option first, so the link is removed. 
 
-Getting Started:
+Getting Started (Beginniner):
 ----------------
 * Find the "<> Code" droplist/button on the GitHub page.
 * Expand the button to see the list of options, then download the ZIP file.
 * Right-click the downloaded ZIP file and choose "Extract".
 * Open the folder and double-click the "sticky notes.exe" file to run the app.
-* Do one of the Hotkey commands as seen below to make your own notes, or right-click a sample note for options. 
+* Do one of the Hotkey commands as seen below to make your own notes, or right-click a sample note for options.
+* Read the Tips for tips and check out the user configuration section near the top of the code.
 
 Customizable Hotkeys:
 --------------------
@@ -69,10 +71,11 @@ Features, Functionality, Usage, and Tips:
 - Notes are created using Win+Shift+N or from clipboard with Win+Shift+C
 - Hotkeys and more can be changed near top of code
 - Tips button in note manager shows current hotkeys and other tips
+- [ ] Pin checkbox indicates if window is "Always on Top"
 - Double-click top bar or right-click for editing options
 - Drag notes by their top bar to reposition
 - Configurable drag area: Option to maximize note space by minimizing drag area
-- Notes auto-save position when moved
+- Notes auto-save position of note when moved
 - Turn off note deletion warning
 - Undelete notes
 - Deleted notes are purged from ini file after 3 days (Configurable)
@@ -112,7 +115,7 @@ Screenshot explanation:
 7.	Submenu showing hidden items.  Choose an item to unhide it.  Or double-click item in Manager listview.
 8.	Submenu showing recently deleted items.  Choose one to undelete, or choose multiple from the Note Manager list. 
 9.  Number nine?
-10.	Sticky Notes Manager gui form. It is hidden by default. Default hotkey to show it is Win+Shift+S.  Size and position of Note Manager is saved in .ini file.
+10.	Sticky Notes Manager gui form. It is hidden by default. Default hotkey to show it is Win+Shift+S.  Size of Note Manager is saved in .ini file.
 11.  Click the `Tips` button for list of hotkeys and other tips.
 12.	The buttons on the top are for mostly ‘app-level’ commands.
 13.	The Filter Settings for the colorized ListView of notes.  Deleted notes are hidden by default.  Use edit box to filter list by note text.  Filter status is saved between sessions.

@@ -6,7 +6,7 @@
 * Project:    Sticky Notes
 * Author:     kunkel321
 * Tool used:  Claude AI
-* Version:    12-20-2025
+* Version:    12-21-2025
 * Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 * Repository: https://github.com/kunkel321/Stickies     
 
@@ -4785,9 +4785,11 @@ Class ToolTipOpts {
 
 startupLog()
 startupLog(*) {
-    FileAppend("============= SCRIPT START " formatTime(A_Now
-    , "MMM-dd hh:mm:ss") " =============`n"
-    , "error_debug_log.txt")
+    if (OptionsConfig.ERROR_LOG) || (OptionsConfig.DEBUG_LOG) {
+        FileAppend("============= SCRIPT START " formatTime(A_Now
+        , "MMM-dd hh:mm:ss") " =============`n"
+        , "error_debug_log.txt")
+    }
 }
 
 ; Helper functions for conditional logging

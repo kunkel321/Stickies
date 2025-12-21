@@ -101,9 +101,7 @@ Known Issues:
 Development Note:
 -----------------
 This script was developed primarily through AI-assisted coding, with Claude AI generating most of the base code structure and functionality. Later versions 
-include additional human-written code for enhanced features and bug fixes.. The system tray context menu has a few extra items, such as "Start with Windows."
-
-This script is unique because nearly every bit of code was created with AI prompts, then pasted into the ahk editor.  A great deal of human input was needed, but very little of the actual code was human-generated.  Edit: In later versions, more human code was added.
+include additional human-written code for enhanced features and bug fixes.. The code includes the class ToolTipOptions by AHK forum member Just me.  A version of the ListView Colors class, also be Just me, is also below.  The system tray context menu has a few extra items, such as "Start with Windows." 
 */
 
 ; #+N:: Create new note

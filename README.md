@@ -4,7 +4,8 @@
 * Author:     kunkel321
 * Tool used:  Claude AI
 * Version:    (Version date will be updated in code.)
-* Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
+* AutoHotkey Forum: https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
+* DonationCoder Forum: https://www.donationcoder.com/forum/index.php?topic=55548.msg456491#msg456491
 * Repository: https://github.com/kunkel321/Stickies     
 
 Installation: 

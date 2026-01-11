@@ -27,6 +27,7 @@ Customizable Hotkeys:
 * Win+Shift+N - Create new note
 * Win+Shift+C - Create new note from clipboard text
 * Win+Shift+S - Toggle main window visibility
+* Win+Shift+M - Show hidden notes menu
 
 Features, Functionality, Usage, and Tips:
 -----------------------------------------

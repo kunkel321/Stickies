@@ -3,12 +3,13 @@
 
 /*
 # Sticky Notes
-* Project:    Sticky Notes
-* Author:     kunkel321
-* Tool used:  Claude AI
-* Version:    12-21-2025
-* Forum:      https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
-* Repository: https://github.com/kunkel321/Stickies     
+* Project:          Sticky Notes
+* Author:           kunkel321
+* Tool used:        Claude AI
+* Version:          1-11-2026
+* AHK Forum:        https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
+* Donation Coder:   https://www.donationcoder.com/forum/index.php?topic=55548
+* Repository:       https://github.com/kunkel321/Stickies     
 
 Installation: 
 -------------
@@ -29,6 +30,7 @@ Customizable Hotkeys:
 * Win+Shift+N - Create new note
 * Win+Shift+C - Create new note from clipboard text
 * Win+Shift+S - Toggle main window visibility
+* Win+Shift+M - Show hidden notes menu
 
 Features, Functionality, Usage, and Tips:
 -----------------------------------------
@@ -86,6 +88,7 @@ Features, Functionality, Usage, and Tips:
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
 - Header Creation: Any text line starting with # becomes bold
 - Hidden or deleted notes can be restored through main window or via note context menu
+- Access hidden note menu directly via hotkey
 - All note data saved to sticky_notes.ini in script directory
 - Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
 - Use manual "Save Status" after significant changes
@@ -104,9 +107,10 @@ This script was developed primarily through AI-assisted coding, with Claude AI g
 include additional human-written code for enhanced features and bug fixes.. The code includes the class ToolTipOptions by AHK forum member Just me.  A version of the ListView Colors class, also be Just me, is also below.  The system tray context menu has a few extra items, such as "Start with Windows." 
 */
 
-; #+N:: Create new note
-; #+C:: Create new note from clipboard text
-; #+S:: Toggle main window visibility
+; #+N:: Create new sticky note
+; #+C:: Create new stick note from clipboard text
+; #+S:: Toggle stickies main window visibility
+; #+M:: Show hidden sticky notes menu
 
 ; Hotkeys and other Configuration.  Change if desired.
 class OptionsConfig {
@@ -115,6 +119,7 @@ class OptionsConfig {
     static TOGGLE_MAIN_WINDOW    := "+#s"  ; Shift+Win+S. Shows/Hide Note Manager window.
     static NEW_NOTE              := "+#n"  ; Shift+Win+N. New note.
     static NEW_CLIPBOARD_NOTE    := "+#c"  ; Shift+Win+C. New note from text on clipboard.
+    static SHOW_HIDDEN_NOTES     := "#+m"  ; Shift+Win+M. Show hidden notes menu.
     static SEARCH_BOX            := "^f"    ; Move cursor to search box.
     static APP_ICON              := "sticky.ico" ; Homemade icon that kunkel321 made.
     static INI_FILE              := "sticky_notes.ini" ; The note storage file. 
@@ -271,6 +276,7 @@ class StickyNotes {
         HotKey(OptionsConfig.TOGGLE_MAIN_WINDOW, (*) => this.ToggleMainWindow())
         HotKey(OptionsConfig.NEW_NOTE, (*) => this.CreateNewNote())
         HotKey(OptionsConfig.NEW_CLIPBOARD_NOTE, (*) => this.CreateClipboardNote())
+        HotKey(OptionsConfig.SHOW_HIDDEN_NOTES, (*) => this.noteManager.ShowHiddenNotes())
             ; Set up context-sensitive hotkey for searching
         HotIfWinActive("ahk_id " this.mainWindow.gui.Hwnd)
         HotKey(OptionsConfig.SEARCH_BOX, (*) => this.FocusSearchBox())
@@ -4073,6 +4079,7 @@ class MainWindow {
             . "`t New Note:`t`t`t" FormatHotkeyForDisplay(OptionsConfig.NEW_NOTE) "`n"
             . "`t Clipboard Note:`t`t`t" FormatHotkeyForDisplay(OptionsConfig.NEW_CLIPBOARD_NOTE) "`n"
             . "`t Show/Hide Window:`t`t`t" FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) "`n"
+            . "`t Show Hidden Notes:`t`t" FormatHotkeyForDisplay(OptionsConfig.SHOW_HIDDEN_NOTES) "`n"
             .  (OptionsConfig.CHECKBOX_MODIFIER_KEY? "`t Toggle Checkbox in Note:`t`t" OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click`n" : "`n") "`n"
             . "There are many more customizable settings near the top of the code.  See the comments for explanations.`n`n"
             . "`t`t~~~Tips for Sticky Note Manager~~~`n"

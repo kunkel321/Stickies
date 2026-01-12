@@ -103,8 +103,7 @@ Known Issues:
 
 Development Note:
 -----------------
-This script was developed primarily through AI-assisted coding, with Claude AI generating most of the base code structure and functionality. Later versions 
-include additional human-written code for enhanced features and bug fixes.. The code includes the class ToolTipOptions by AHK forum member Just me.  A version of the ListView Colors class, also be Just me, is also below.  The system tray context menu has a few extra items, such as "Start with Windows." 
+This script was developed primarily through AI-assisted coding, with Claude AI generating most of the base code structure and functionality. Later versions include additional human-written code for enhanced features and bug fixes. The code includes the class ToolTipOptions by AHK forum member Just me.  A version of the ListView Colors class, also by Just me, is also below. 
 */
 
 ; #+N:: Create new sticky note
@@ -119,7 +118,7 @@ class OptionsConfig {
     static TOGGLE_MAIN_WINDOW    := "+#s"  ; Shift+Win+S. Shows/Hide Note Manager window.
     static NEW_NOTE              := "+#n"  ; Shift+Win+N. New note.
     static NEW_CLIPBOARD_NOTE    := "+#c"  ; Shift+Win+C. New note from text on clipboard.
-    static SHOW_HIDDEN_NOTES     := "#+m"  ; Shift+Win+M. Show hidden notes menu.
+    static SHOW_HIDDEN_NOTES     := "+#m"  ; Shift+Win+M. Show hidden notes menu.
     static SEARCH_BOX            := "^f"    ; Move cursor to search box.
     static APP_ICON              := "sticky.ico" ; Homemade icon that kunkel321 made.
     static INI_FILE              := "sticky_notes.ini" ; The note storage file. 
@@ -3071,13 +3070,20 @@ class NoteEditor {
         borderCB.OnEvent("Click", (*) => this.UpdateBorder(borderCB.Value))
 
         
-        this.gui.Add("Button", "x10 y+15 w70", "&Save")
+        ; Calculate button width for 2x2 layout (2 buttons per row)
+        ; editorWidth - 26 accounts for left margin (10) + right margin (10) + gap between buttons (6)
+        buttonWidth := (editorWidth - 26) / 2
+        
+        this.gui.Add("Button", "x10 y+15 w" buttonWidth, "&Save")
             .OnEvent("Click", (*) => this.Save())
 
-        this.gui.Add("Button", "x+8 w70", "&Delete")
+        this.gui.Add("Button", "x+6 yp w" buttonWidth, "Save && &Hide")
+            .OnEvent("Click", (*) => this.SaveAndHide())
+
+        this.gui.Add("Button", "x10 y+6 w" buttonWidth, "&Delete")
             .OnEvent("Click", this.DeleteNote.Bind(this))
 
-        this.gui.Add("Button", "x+8 w70", "&Cancel")
+        this.gui.Add("Button", "x+6 yp w" buttonWidth, "&Cancel")
             .OnEvent("Click", (*) => this.Hide())
     }
 
@@ -3267,6 +3273,62 @@ class NoteEditor {
             }
         } catch Error as err {
             LogError("Error in NoteEditor.Save: " err.Message)
+        }
+    }
+
+    SaveAndHide(*) {
+        try {
+            ; Hide editor immediately for instant UI responsiveness
+            this.Hide()
+            
+            ; Get current content
+            newContent := this.editControl.Text
+            
+            ; Store current note position
+            x := 0, y := 0
+            if (this.note.borderGui && this.note.borderGui.Gui1) {
+                this.note.borderGui.Gui1.GetPos(&x, &y)
+            } else {
+                this.note.gui.GetPos(&x, &y)
+            }
+            
+            ; Store new width value
+            newWidth := this.widthEdit.Value
+            
+            ; Update note with properties
+            this.note.UpdateContent(newContent, {
+                bgcolor: this.note.bgcolor,
+                font: this.note.font,
+                fontSize: this.note.fontSize,
+                isBold: this.note.isBold,
+                fontColor: this.note.fontColor,
+                isOnTop: this.note.isOnTop,  
+                width: newWidth,
+                hasBorder: this.note.hasBorder,
+                hasAlarm: this.note.hasAlarm,
+                alarmTime: this.note.alarmTime,
+                alarmSound: this.note.alarmSound,
+                alarmDays: this.note.alarmDays,
+                alarmRepeatCount: this.note.alarmRepeatCount
+            })
+
+            ; Save to storage
+            (NoteStorage()).SaveNote(this.note)
+            
+            ; Hide the note (must be after save to preserve hidden state in INI)
+            app.noteManager.HideNote(this.note.id)
+            
+            ; Destroy the editor GUI
+            this.note.editor := ""
+            this.gui.Destroy()
+            
+            ; Defer ListView refresh to allow editor to close immediately
+            ; Only refresh if main window exists and is visible
+            if (WinExist("ahk_id " app.mainWindow.gui.Hwnd)) {
+                SetTimer((*) => app.mainWindow.PopulateNoteList(), -10)
+            }
+        } catch Error as err {
+            LogError("Error in NoteEditor.SaveAndHide: " err.Message)
         }
     }
 

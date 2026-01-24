@@ -6,7 +6,7 @@
 * Project:          Sticky Notes
 * Author:           kunkel321
 * Tool used:        Claude AI
-* Version:          1-11-2026
+* Version:          1-24-2026
 * AHK Forum:        https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 * Donation Coder:   https://www.donationcoder.com/forum/index.php?topic=55548
 * Repository:       https://github.com/kunkel321/Stickies     
@@ -42,6 +42,7 @@ Features, Functionality, Usage, and Tips:
 - Several formatting options including fonts, colors, sizing, and borders
 - Visual customization: Border thickness changes with bold text
 - Border color always matches font color. 
+- Several languages supported for weekday names and date formats.  English is default.
 - Stick notes to windows: Notes can be attached to specific application windows
 - Window persistence: Notes "stuck to" specific windows reappear when window reopens
 - Notes can be unstuck by clicking the window button again
@@ -99,7 +100,6 @@ Features, Functionality, Usage, and Tips:
 Known Issues:
 -------------
 - In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled.
-- Please consider that bold text, and checkbox text, does not wrap -- Increase note width if needed.
 
 Development Note:
 -----------------
@@ -149,7 +149,125 @@ class OptionsConfig {
     ; Undelete settings.
     static DAYS_DELETED_KEPT := 10          ; Number of days to keep deleted notes before purging.
     static DEFAULT_SHOW_DELETED := false    ; Whether to show deleted notes in listview by default.
+    
+    ; Day Map for localization
+    ; ========================
+    ; These static properties are initialized by InitLocalization() based on system language (A_Language).
+    ; The map translates your SYSTEM's day abbreviations to a consistent 2-letter format.
+    ; ORDERED_DAYS maintains the order: Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday
+    ; IMPORTANT: Do NOT reorder the days. The order must always be: Su/Mo/Tu/We/Th/Fr/Sa (or language equivalent)
+    
+    static DAY_MAP := Map()     ; Will be populated by InitLocalization()
+    static ORDERED_DAYS := []   ; Will be populated by InitLocalization()
+    
+    ; Date Format for User Display
+    ; =============================
+    ; These are initialized by InitLocalization() based on system language.
+    ; These are for DISPLAY ONLY. Internal storage uses yyyyMMdd and yyyyMMddHHmmss (unchanged, locale-independent).
+    ; 
+    ; Examples:
+    ;   "M-d-yyyy"   = 3-15-2025 (US style)
+    ;   "dd-MM-yyyy" = 15-03-2025 (European style)
+    ;   "dd.MM.yyyy" = 15.03.2025 (German style)
+    
+    static DATE_FORMAT_DISPLAY := ""    ; Initialized by InitLocalization()
+    static DATE_FORMAT_SHORT := ""      ; Initialized by InitLocalization()
+    
+    ; Initialize localization based on system language
+    static InitLocalization() {
+        langCode := A_Language
+        lastTwo := SubStr(langCode, 3)  ; Extract last 2 digits to identify language family
+        
+        Switch lastTwo {
+            Case "07":  ; German (0407, 0807, 0c07, etc.)
+                This.DAY_MAP := Map(
+                    "So.", "So",
+                    "Mo.", "Mo",
+                    "Di.", "Di",
+                    "Mi.", "Mi",
+                    "Do.", "Do",
+                    "Fr.", "Fr",
+                    "Sa.", "Sa"
+                )
+                This.ORDERED_DAYS := ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"]
+                This.DATE_FORMAT_DISPLAY := "dd.MM.yyyy"
+                This.DATE_FORMAT_SHORT := "dd.MM"
+                
+            Case "13":  ; Dutch (0413, 0813)
+                This.DAY_MAP := Map(
+                    "zon", "Zo",
+                    "maa", "Ma",
+                    "din", "Di",
+                    "woe", "Wo",
+                    "don", "Do",
+                    "vri", "Vr",
+                    "zat", "Za"
+                )
+                This.ORDERED_DAYS := ["Zo", "Ma", "Di", "Wo", "Do", "Vr", "Za"]
+                This.DATE_FORMAT_DISPLAY := "dd-MM-yyyy"
+                This.DATE_FORMAT_SHORT := "dd-MM"
+                
+            Case "0c":  ; French (040c, 080c, 0c0c, 100c, 140c, 180c)
+                This.DAY_MAP := Map(
+                    "dim", "Di",
+                    "lun", "Lu",
+                    "mar", "Ma",
+                    "mer", "Me",
+                    "jeu", "Je",
+                    "ven", "Ve",
+                    "sam", "Sa"
+                )
+                This.ORDERED_DAYS := ["Di", "Lu", "Ma", "Me", "Je", "Ve", "Sa"]
+                This.DATE_FORMAT_DISPLAY := "dd/MM/yyyy"
+                This.DATE_FORMAT_SHORT := "dd/MM"
+                
+            Case "0a":  ; Spanish (0c0a, 080a, 100a, 140a, 180a, etc.)
+                This.DAY_MAP := Map(
+                    "dom", "Do",
+                    "lun", "Lu",
+                    "mar", "Ma",
+                    "mié", "Mi",
+                    "jue", "Ju",
+                    "vie", "Vi",
+                    "sáb", "Sa"
+                )
+                This.ORDERED_DAYS := ["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"]
+                This.DATE_FORMAT_DISPLAY := "dd/MM/yyyy"
+                This.DATE_FORMAT_SHORT := "dd/MM"
+                
+            Case "19":  ; Russian (0419, 0819, 0c19)
+                This.DAY_MAP := Map(
+                    "вос", "Вс",
+                    "пон", "Пн",
+                    "вто", "Вт",
+                    "сре", "Ср",
+                    "чет", "Чт",
+                    "пят", "Пт",
+                    "суб", "Сб"
+                )
+                This.ORDERED_DAYS := ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]
+                This.DATE_FORMAT_DISPLAY := "dd.MM.yyyy"
+                This.DATE_FORMAT_SHORT := "dd.MM"
+                
+            Default:  ; English (0409, 0809, 0c09, 1009, 1409, 1809, 2009, 2409) and unsupported languages default to English
+                This.DAY_MAP := Map(
+                    "Sun", "Su",
+                    "Mon", "Mo",
+                    "Tue", "Tu",
+                    "Wed", "We",
+                    "Thu", "Th",
+                    "Fri", "Fr",
+                    "Sat", "Sa"
+                )
+                This.ORDERED_DAYS := ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+                This.DATE_FORMAT_DISPLAY := "M-d-yyyy"
+                This.DATE_FORMAT_SHORT := "MMM-dd"
+        }
+    }
 }
+
+; Initialize localization based on system language immediately after OptionsConfig is defined
+OptionsConfig.InitLocalization()
 
 ; Global Constants
 class StickyNotesConfig {
@@ -537,17 +655,8 @@ class StickyNotes {
         currentDay := FormatTime(, "ddd")
         currentDate := FormatTime(, "yyyyMMdd")
         
-        ; Convert current day to short format
-        dayMap := Map(
-            "Sun", "Su",
-            "Mon", "Mo",
-            "Tue", "Tu",
-            "Wed", "We",
-            "Thu", "Th",
-            "Fri", "Fr",
-            "Sat", "Sa"
-        )
-        shortDay := dayMap[currentDay]
+        ; Convert current day to short format using the centralized day map
+        shortDay := OptionsConfig.DAY_MAP[currentDay]
         
         ; Check for morning time (for dateless alarms)
         isMorningTime := (A_Hour >= OptionsConfig.UNTIMED_ALARM_START_HOUR && A_Hour <= OptionsConfig.UNTIMED_ALARM_END_HOUR)
@@ -721,11 +830,8 @@ class StickyNotes {
         currentDay := FormatTime(A_Now, "ddd")
         currentDate := FormatTime(A_Now, "yyyyMMdd")
         
-        dayMap := Map(
-            "Sun", "Su", "Mon", "Mo", "Tue", "Tu",
-            "Wed", "We", "Thu", "Th", "Fri", "Fr", "Sat", "Sa"
-        )
-        shortDay := dayMap[currentDay]
+        ; Convert current day to short format using the centralized day map
+        shortDay := OptionsConfig.DAY_MAP[currentDay]
 
         notesWithAlarms := []
         for id, note in this.noteManager.notes {
@@ -793,7 +899,7 @@ class StickyNotes {
                                 previewText := StrLen(note.content) > 50 ? SubStr(note.content, 1, 47) "..." : note.content
                                 missedAlarms.Push({
                                     time: note.alarmTime,
-                                    date: FormatTime(note.alarmDate, "M-d-yyyy"),
+                                    date: FormatTime(note.alarmDate, OptionsConfig.DATE_FORMAT_DISPLAY),
                                     recurrence: note.alarmDays ? note.alarmDays : "Once",
                                     sound: note.alarmSound,
                                     preview: previewText
@@ -808,7 +914,7 @@ class StickyNotes {
                         previewText := StrLen(note.content) > 50 ? SubStr(note.content, 1, 47) "..." : note.content
                         missedAlarms.Push({
                             time: note.alarmTime,
-                            date: FormatTime(note.alarmDate, "M-d-yyyy"),
+                            date: FormatTime(note.alarmDate, OptionsConfig.DATE_FORMAT_DISPLAY),
                             recurrence: note.alarmDays ? note.alarmDays : "Once",
                             sound: note.alarmSound,
                             preview: previewText
@@ -851,17 +957,8 @@ class StickyNotes {
         
         Debug("Running date-only alarm check - Current date: " currentDate " Day: " currentDay)
         
-        ; Convert current day to short format
-        dayMap := Map(
-            "Sun", "Su",
-            "Mon", "Mo",
-            "Tue", "Tu",
-            "Wed", "We",
-            "Thu", "Th",
-            "Fri", "Fr",
-            "Sat", "Sa"
-        )
-        shortDay := dayMap[currentDay]
+        ; Convert current day to short format using the centralized day map
+        shortDay := OptionsConfig.DAY_MAP[currentDay]
         
         ; Check if it's morning time (using configured hours)
         isMorningTime := (A_Hour >= OptionsConfig.UNTIMED_ALARM_START_HOUR && A_Hour <= OptionsConfig.UNTIMED_ALARM_END_HOUR)
@@ -3022,7 +3119,7 @@ class NoteEditor {
                 addAlarmBtnText := ""
                 ; Add date if present
                 if (this.note.alarmDate)
-                    addAlarmBtnText .= FormatTime(this.note.alarmDate, "MMM-dd")
+                    addAlarmBtnText .= FormatTime(this.note.alarmDate, OptionsConfig.DATE_FORMAT_SHORT)
                     
                 ; Add time if present
                 if (this.note.alarmTime) {
@@ -3442,11 +3539,10 @@ class AlarmDialog {
         this.visualShake.Value := OptionsConfig.DEFAULT_ALARM_SHAKE 
         this.repeatOnce.Value := 1
 
-        ; Weekday checkboxes
+        ; Weekday checkboxes (using ordered days from OptionsConfig)
         this.gui.AddText("xm y+15", "Reoccur:")
-        days := ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
         this.weekdayChecks := Map()
-        for i, day in days {
+        for i, day in OptionsConfig.ORDERED_DAYS {
             this.weekdayChecks[day] := this.gui.AddCheckbox("x+5 yp", day)
         }
         
@@ -3510,7 +3606,7 @@ class AlarmDialog {
 
     DatePickerOK(*) {
         selectedDate := this.datePickerCal.Value
-        readableDate := FormatTime(selectedDate, "M-d-yyyy")
+        readableDate := FormatTime(selectedDate, OptionsConfig.DATE_FORMAT_DISPLAY)
         this.selectedDate := FormatTime(selectedDate, "yyyyMMdd")
         this.dateBtn.Text := readableDate
         this.datePickerGui.Destroy()
@@ -3572,7 +3668,7 @@ class AlarmDialog {
         ; Load the date if it exists
         this.selectedDate := this.note.HasOwnProp("alarmDate") ? this.note.alarmDate : ""
         if (this.selectedDate) {
-            this.dateBtn.Text := FormatTime(this.selectedDate, "M-d-yyyy")
+            this.dateBtn.Text := FormatTime(this.selectedDate, OptionsConfig.DATE_FORMAT_DISPLAY)
         }
         
         ; Check if alarm has time
@@ -3729,7 +3825,7 @@ class AlarmDialog {
                 buttonText := ""
                 ; Add date if present
                 if (this.note.alarmDate)
-                    buttonText .= FormatTime(this.note.alarmDate, "MMM-dd")
+                    buttonText .= FormatTime(this.note.alarmDate, OptionsConfig.DATE_FORMAT_SHORT)
                     
                 ; Add time if present
                 if (this.note.alarmTime) {
@@ -4219,7 +4315,7 @@ class MainWindow {
             if (noteData.hasAlarm) {
                 ; Start with date if present
                 if (noteData.alarmDate)
-                    combinedInfo .= FormatTime(noteData.alarmDate, "MMM-dd")
+                    combinedInfo .= FormatTime(noteData.alarmDate, OptionsConfig.DATE_FORMAT_SHORT)
                 
                 ; Add time if present
                 if (noteData.alarmTime) {

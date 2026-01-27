@@ -6,7 +6,7 @@
 * Project:          Sticky Notes
 * Author:           kunkel321
 * Tool used:        Claude AI
-* Version:          1-24-2026
+* Version:          1-27-2026
 * AHK Forum:        https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 * Donation Coder:   https://www.donationcoder.com/forum/index.php?topic=55548
 * Repository:       https://github.com/kunkel321/Stickies     
@@ -195,13 +195,13 @@ class OptionsConfig {
                 
             Case "13":  ; Dutch (0413, 0813)
                 This.DAY_MAP := Map(
-                    "zon", "Zo",
-                    "maa", "Ma",
-                    "din", "Di",
-                    "woe", "Wo",
-                    "don", "Do",
-                    "vri", "Vr",
-                    "zat", "Za"
+                    "zo", "zo",
+                    "ma", "ma",
+                    "di", "di",
+                    "wo", "wo",
+                    "do", "do",
+                    "vr", "vr",
+                    "za", "za"
                 )
                 This.ORDERED_DAYS := ["Zo", "Ma", "Di", "Wo", "Do", "Vr", "Za"]
                 This.DATE_FORMAT_DISPLAY := "dd-MM-yyyy"

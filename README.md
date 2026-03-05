@@ -39,12 +39,14 @@ Features, Functionality, Usage, and Tips:
 - Several formatting options including fonts, colors, sizing, and borders
 - Visual customization: Border thickness changes with bold text
 - Border color always matches font color. 
+- Several languages supported for weekday names and date formats.  English is default.
 - Stick notes to windows: Notes can be attached to specific application windows
 - Window persistence: Notes "stuck to" specific windows reappear when window reopens
 - Notes can be unstuck by clicking the window button again
 - Alarm System: Set one-time or recurring alarms with custom sounds
 - Set alarms for individual notes with optional weekly recurrence
 - Many editor dialog options support accelerator keys (Alt+A for alarm, etc.)
+- Delete key deletes note from desktop.
 - Visual alert: Notes can shake when alarms trigger
 - Multiple alarm repeats: Choose between once, 3x, or 10x alarm repetitions
 - Alarm sounds: Custom alarm sounds can be added to the Sounds folder
@@ -63,8 +65,10 @@ Features, Functionality, Usage, and Tips:
 - Rich preview: Right-click notes in manager for formatted preview with original fonts/colors
 - Search functionality: Filter notes by content in main window
 - Selective display: Filter note list to show only hidden or visible notes
+- Double-click a note in Note Manager to show/hide
 - Include recently deleted note in hidden/visible listview filter
 - Deleted notes are identified by deletion time appearing in listview
+- Reorder notes, then merge text.  Top note's properties are used. Bottom notes are deleted
 - Access main window with Win+Shift+S (hidden by default)
 - Resize main window, by dragging edge/corner, to see more of note text in listview
 - Notes' show alarm times and window attachments in note manager listview
@@ -85,13 +89,14 @@ Features, Functionality, Usage, and Tips:
 - Checkbox Safety: Alt+Click required by default to prevent accidental toggles
 - Header Creation: Any text line starting with # becomes bold
 - Hidden or deleted notes can be restored through main window or via note context menu
+- Access hidden note menu directly via hotkey
 - All note data saved to sticky_notes.ini in script directory
 - Check error_debug_log.txt for troubleshooting (if enabled; warning: system hog)
 - Use manual "Save Status" after significant changes
 - "Load/Reload Notes" refreshes all notes from storage
 - System tray icon provides quick access to common functions
 - Start with Windows: Option available in tray menu
-
+  
 Known Issues:
 -------------
 - In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled.

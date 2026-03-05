@@ -6,7 +6,7 @@
 * Project:          Sticky Notes
 * Author:           kunkel321
 * Tool used:        Claude AI
-* Version:          1-27-2026
+* Version:          3-5-2026
 * AHK Forum:        https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 * Donation Coder:   https://www.donationcoder.com/forum/index.php?topic=55548
 * Repository:       https://github.com/kunkel321/Stickies     
@@ -49,6 +49,7 @@ Features, Functionality, Usage, and Tips:
 - Alarm System: Set one-time or recurring alarms with custom sounds
 - Set alarms for individual notes with optional weekly recurrence
 - Many editor dialog options support accelerator keys (Alt+A for alarm, etc.)
+- Delete key deletes note from desktop.
 - Visual alert: Notes can shake when alarms trigger
 - Multiple alarm repeats: Choose between once, 3x, or 10x alarm repetitions
 - Alarm sounds: Custom alarm sounds can be added to the Sounds folder
@@ -67,8 +68,10 @@ Features, Functionality, Usage, and Tips:
 - Rich preview: Right-click notes in manager for formatted preview with original fonts/colors
 - Search functionality: Filter notes by content in main window
 - Selective display: Filter note list to show only hidden or visible notes
+- Double-click a note in Note Manager to show/hide
 - Include recently deleted note in hidden/visible listview filter
 - Deleted notes are identified by deletion time appearing in listview
+- Reorder notes, then merge text.  Top note's properties are used. Bottom notes are deleted
 - Access main window with Win+Shift+S (hidden by default)
 - Resize main window, by dragging edge/corner, to see more of note text in listview
 - Notes' show alarm times and window attachments in note manager listview
@@ -99,7 +102,7 @@ Features, Functionality, Usage, and Tips:
 
 Known Issues:
 -------------
-- In note listview, if notes are sorted, colors will not sort with them--that is why sorting is disabled.
+- In note listview, if notes are sorted, colors will not sort with them--that is why by-column sorting is disabled.
 
 Development Note:
 -----------------
@@ -120,6 +123,8 @@ class OptionsConfig {
     static NEW_CLIPBOARD_NOTE    := "+#c"  ; Shift+Win+C. New note from text on clipboard.
     static SHOW_HIDDEN_NOTES     := "+#m"  ; Shift+Win+M. Show hidden notes menu.
     static SEARCH_BOX            := "^f"    ; Move cursor to search box.
+    static MOVE_NOTE_UP          := "^Up"   ; Ctrl+Up. Move selected note up in manager list.
+    static MOVE_NOTE_DOWN        := "^Down" ; Ctrl+Down. Move selected note down in manager list.
     static APP_ICON              := "sticky.ico" ; Homemade icon that kunkel321 made.
     static INI_FILE              := "sticky_notes.ini" ; The note storage file. 
     static AUTO_OPEN_EDITOR      := true   ; Should Note Editor auto open upon note creation?    
@@ -131,7 +136,7 @@ class OptionsConfig {
     static WARN_ON_DELETE_NOTE   := true   ; Whether to show confirmation before deleting notes (except multiple deletion).
     static DISABLE_TABLE_SORT    := true   ; When sorting note table in note manager, colors won't sort, so disabled.
     static MANAGER_DEFAULT_WIDTH := 720
-    static MANAGER_DEFAULT_HEIGHT   := 500
+    static MANAGER_DEFAULT_HEIGHT   := 535
     static UNTIMED_ALARM_START_HOUR := 4   ; When untimed alarms begin to appear (24-hour format)
     static UNTIMED_ALARM_END_HOUR   := 10  ; When untimed alarms stop appearing (24-hour format)
     ; Visual shake for alarms settings.
@@ -149,6 +154,9 @@ class OptionsConfig {
     ; Undelete settings.
     static DAYS_DELETED_KEPT := 10          ; Number of days to keep deleted notes before purging.
     static DEFAULT_SHOW_DELETED := false    ; Whether to show deleted notes in listview by default.
+    ; Merge notes settings.
+    static MERGE_SEPARATOR       := "`n`n"  ; Text inserted between merged notes. "`n" = blank line, "`n----`n" = rule, "" = none.
+    static MERGE_OPEN_EDITOR     := true    ; Whether to open the editor after merging notes.
     
     ; Day Map for localization
     ; ========================
@@ -394,10 +402,46 @@ class StickyNotes {
         HotKey(OptionsConfig.NEW_NOTE, (*) => this.CreateNewNote())
         HotKey(OptionsConfig.NEW_CLIPBOARD_NOTE, (*) => this.CreateClipboardNote())
         HotKey(OptionsConfig.SHOW_HIDDEN_NOTES, (*) => this.noteManager.ShowHiddenNotes())
-            ; Set up context-sensitive hotkey for searching
+            ; Set up context-sensitive hotkey for searching and note reordering
         HotIfWinActive("ahk_id " this.mainWindow.gui.Hwnd)
         HotKey(OptionsConfig.SEARCH_BOX, (*) => this.FocusSearchBox())
+        HotKey(OptionsConfig.MOVE_NOTE_UP,   (*) => this.mainWindow.MoveSelectedNote(-1))
+        HotKey(OptionsConfig.MOVE_NOTE_DOWN, (*) => this.mainWindow.MoveSelectedNote(1))
         HotIf()
+        ; Delete key when a sticky note window is active
+        HotIf(this.IsNoteWindowActive.Bind(this))
+        HotKey("Delete", (*) => this.DeleteActiveNote())
+        HotIf()
+    }
+
+    ; Returns true if the currently active window is one of our sticky note GUIs
+    IsNoteWindowActive(*) {
+        activeHwnd := WinExist("A")
+        for id, note in this.noteManager.notes {
+            try {
+                ; Check the note GUI itself
+                if (note.gui && note.gui.Hwnd = activeHwnd)
+                    return true
+                ; Check the border GUI (which is the outermost window when bordered)
+                if (note.borderGui && note.borderGui.Gui1 && note.borderGui.Gui1.Hwnd = activeHwnd)
+                    return true
+            }
+        }
+        return false
+    }
+
+    ; Delete whichever sticky note window is currently active
+    DeleteActiveNote() {
+        activeHwnd := WinExist("A")
+        for id, note in this.noteManager.notes {
+            try {
+                if ((note.gui && note.gui.Hwnd = activeHwnd)
+                || (note.borderGui && note.borderGui.Gui1 && note.borderGui.Gui1.Hwnd = activeHwnd)) {
+                    note.Delete()
+                    return
+                }
+            }
+        }
     }
     
     ToggleMainWindow(*) {
@@ -1441,6 +1485,15 @@ class Note {
         
         ; Register WM_ACTIVATE handler only once per note (not in SetupEvents)
         OnMessage(0x0006, this.WM_ACTIVATE.Bind(this))
+
+        ; Register Delete key scoped to this note's window(s)
+        HotIfWinActive("ahk_id " this.gui.Hwnd)
+        HotKey("Delete", this.Delete.Bind(this))
+        if (this.borderGui && this.borderGui.Gui1) {
+            HotIfWinActive("ahk_id " this.borderGui.Gui1.Hwnd)
+            HotKey("Delete", this.Delete.Bind(this))
+        }
+        HotIf()
     }
 
     ; Helper method to get object keys
@@ -2000,6 +2053,15 @@ class Note {
         
         ; Set up events again
         this.SetupEvents()
+
+        ; Re-register Delete hotkey for the new GUI HWNDs
+        HotIfWinActive("ahk_id " this.gui.Hwnd)
+        HotKey("Delete", this.Delete.Bind(this))
+        if (this.borderGui && this.borderGui.Gui1) {
+            HotIfWinActive("ahk_id " this.borderGui.Gui1.Hwnd)
+            HotKey("Delete", this.Delete.Bind(this))
+        }
+        HotIf()
         
         ; Update stored position
         this.UpdatePosition()
@@ -2597,6 +2659,10 @@ class NoteStorage {
             ; If note is deleted, save deletion timestamp
             if (note.HasOwnProp("deletedTime") && note.deletedTime)
                 IniWrite(note.deletedTime, OptionsConfig.INI_FILE, sectionName, "DeletedTime")
+
+            ; Save sort order if present
+            if (note.HasOwnProp("sortOrder") && note.sortOrder)
+                IniWrite(note.sortOrder, OptionsConfig.INI_FILE, sectionName, "SortOrder")
                 
             return true
         } catch as err {
@@ -2731,7 +2797,8 @@ class NoteStorage {
                 lastPlayDate: IniRead(OptionsConfig.INI_FILE, sectionName, "LastPlayDate", ""),
                 isStuckToWindow: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "IsStuckToWindow", "0")) = 1,
                 stuckWindowTitle: IniRead(OptionsConfig.INI_FILE, sectionName, "StuckWindowTitle", ""),
-                stuckWindowClass: IniRead(OptionsConfig.INI_FILE, sectionName, "StuckWindowClass", "")
+                stuckWindowClass: IniRead(OptionsConfig.INI_FILE, sectionName, "StuckWindowClass", ""),
+                sortOrder: Integer(IniRead(OptionsConfig.INI_FILE, sectionName, "SortOrder", "0"))
             }
 
             return noteData
@@ -2781,6 +2848,35 @@ class NoteStorage {
             for noteId, section in validSections {
                 if noteData := this.LoadNote(noteId) {
                     notes.Push(noteData)
+                }
+            }
+
+            ; Assign SortOrder to notes that don't have one yet (first-run migration)
+            needsMigration := false
+            for noteData in notes {
+                if (noteData.sortOrder = 0) {
+                    needsMigration := true
+                    break
+                }
+            }
+            if (needsMigration) {
+                for i, noteData in notes {
+                    if (noteData.sortOrder = 0) {
+                        noteData.sortOrder := i * 10
+                        IniWrite(noteData.sortOrder, OptionsConfig.INI_FILE, "Note-" noteData.id, "SortOrder")
+                    }
+                }
+            }
+
+            ; Sort notes by SortOrder
+            ; Simple insertion sort on the array
+            loop (notes.Length - 1) {
+                i := A_Index + 1
+                while (i > 1 && notes[i].sortOrder < notes[i-1].sortOrder) {
+                    temp := notes[i]
+                    notes[i] := notes[i-1]
+                    notes[i-1] := temp
+                    i--
                 }
             }
 
@@ -3994,6 +4090,7 @@ class MainWindow {
     hideWindowBtn := ""
     searchEdit := ""    ; Search box control
     botButtons := []
+    moveButtons := []   ; Up/Down sort buttons
     storage := ""      ; Storage for saving/loading notes
 
     __New() {
@@ -4110,7 +4207,7 @@ class MainWindow {
         }
         
         ; Create main window
-        this.gui := Gui("+AlwaysOnTop +Resize +MinSize360x375", "Sticky Notes Manager")
+        this.gui := Gui("+AlwaysOnTop +Resize +MinSize360x410", "Sticky Notes Manager")
         this.gui.BackColor := formColor
         buttonW := 140  ; Button width
         spacing := 10   ; Space between buttons
@@ -4123,7 +4220,7 @@ class MainWindow {
         this.gui.SetFont("c" fontColor)
         this.titleText := this.gui.Add("Text", "x57 y10", "Sticky Notes Manager")
         this.gui.setFont("norm s" TextFont)
-        this.pinCheckbox := this.gui.Add("Checkbox", "x" (totalWidth - 100) " y13 Checked", "Pin")
+        this.pinCheckbox := this.gui.Add("Checkbox", "x" (totalWidth - 120) " y13 Checked", "Pin")
         this.pinCheckbox.OnEvent("Click", (*) => this.TogglePinned())
         this.tipsBtn := this.gui.Add("Button", "x" (totalWidth - 45) " y10 h25 w40", "Tips")
         this.tipsBtn.OnEvent("Click", (*) => this.ShowTips())
@@ -4199,22 +4296,35 @@ class MainWindow {
         this.noteList.OnEvent("DoubleClick", this.ToggleSelectedNoteVisibility.Bind(this))
         this.noteList.OnEvent("ContextMenu", this.HandleClick.Bind(this))
 
-        buttonY := "y+10"
-        ; Bottom row buttons
-        tempBtn := this.gui.Add("Button", "x10 " buttonY " w" buttonW " h25", "&Edit Note")
+        ; First bottom row - Move Up / Merge Notes / Move Down (third width each)
+        thirdW := Floor((totalWidth - spacing * 2) / 3)
+        tempBtn := this.gui.Add("Button", "x10 y+8 w" thirdW " h25", "Move ↑ Up")
+        tempBtn.OnEvent("Click", (*) => this.MoveSelectedNote(-1))
+        this.moveButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (thirdW + spacing + 10) " yp w" thirdW " h25", "&Merge Notes")
+        tempBtn.OnEvent("Click", (*) => this.MergeSelectedNotes())
+        this.moveButtons.push(tempBtn)
+
+        tempBtn := this.gui.Add("Button", "x" (thirdW * 2 + spacing * 2 + 10) " yp w" thirdW " h25", "Move ↓ Down")
+        tempBtn.OnEvent("Click", (*) => this.MoveSelectedNote(1))
+        this.moveButtons.push(tempBtn)
+
+        ; Second bottom row - Edit / Hide / Delete
+        tempBtn := this.gui.Add("Button", "x10 y+3 w" buttonW " h25", "&Edit Note")
         tempBtn.OnEvent("Click", (*) => this.EditSelectedNote())
         this.botButtons.push(tempBtn)
 
         tempBtn := this.gui.Add("Button", "x" (buttonW + spacing + 10) " yp w" buttonW " h25", "&Hide Note")
         tempBtn.OnEvent("Click", (*) => this.HideSelectedNote())
-        
         this.botButtons.push(tempBtn)
 
         tempBtn := this.gui.Add("Button", "x" (buttonW * 2 + spacing * 2 + 10) " yp w" buttonW " h25", "&Delete Note")
         tempBtn.OnEvent("Click", (*) => this.DeleteSelectedNote())
         this.botButtons.push(tempBtn)
 
-        tempBtn := this.gui.Add("Button", "x10 y+5 w" buttonW " h25", "Bring Fwd")
+        ; Third bottom row - Bring Fwd / Unhide / Undelete
+        tempBtn := this.gui.Add("Button", "x10 y+3 w" buttonW " h25", "Bring Fwd")
         tempBtn.OnEvent("Click", (*) => this.ShowSelectedNote())
         this.botButtons.push(tempBtn)
 
@@ -4238,10 +4348,12 @@ class MainWindow {
             . "`t Clipboard Note:`t`t`t" FormatHotkeyForDisplay(OptionsConfig.NEW_CLIPBOARD_NOTE) "`n"
             . "`t Show/Hide Window:`t`t`t" FormatHotkeyForDisplay(OptionsConfig.TOGGLE_MAIN_WINDOW) "`n"
             . "`t Show Hidden Notes:`t`t" FormatHotkeyForDisplay(OptionsConfig.SHOW_HIDDEN_NOTES) "`n"
+            . "`t Move Note Up (Manager):`t`t" FormatHotkeyForDisplay(OptionsConfig.MOVE_NOTE_UP) "`n"
+            . "`t Move Note Down (Manager):`t" FormatHotkeyForDisplay(OptionsConfig.MOVE_NOTE_DOWN) "`n"
             .  (OptionsConfig.CHECKBOX_MODIFIER_KEY? "`t Toggle Checkbox in Note:`t`t" OptionsConfig.CHECKBOX_MODIFIER_KEY "+Click`n" : "`n") "`n"
             . "There are many more customizable settings near the top of the code.  See the comments for explanations.`n`n"
             . "`t`t~~~Tips for Sticky Note Manager~~~`n"
-            . "Select list item, then double-click to toggle show/hide.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, deleted, or undeleted.  Drag edge/corner of window to change its size. When deleted notes are shown, identify them by the date and time of deletion, in note text column.`n`n"
+            . "Select list item, then double-click to toggle show/hide.  Note item must be unhidden before editing or deleting. Right-click for 2 second preview of note content.  Ctrl+Click to select muliple note items.  Notes can be bulk hidden, unhidden, deleted, or undeleted.  Use Move ↑/↓ buttons or Ctrl+Up/Down to reorder notes.  Ctrl+Click two or more adjacent notes then click Merge Notes to combine them -- the top note's properties are kept and the others' text is appended then deleted.  Drag edge/corner of window to change its size. When deleted notes are shown, identify them by the date and time of deletion, in note text column.`n`n"
             . "`t`t~~~Tips for Sticky Notes~~~`n"
             . "The top/center 'title bar' area of the note is the drag area.  Reposition a note by dragging its drag area.  Open note in Note Editor by double-clicking drag area. Notes can be 'stuck to' certain windows.  Then they will disappear until the window is active again.  New notes will cycle in terms of position, note color, and font color.  Cycling font color can be turned off.  Note editor width will try to match with of note.  Right click note for context menu of commands.  Deleted notes are purged after X days.`n`n"
             . "`t`t~~~Tips for Alarms~~~`n"
@@ -4661,6 +4773,180 @@ class MainWindow {
         }
     }
 
+    MoveSelectedNote(direction) {
+        ; direction: -1 = move up, 1 = move down
+        selectedIds := this.GetSelectedNoteIds()
+        if (selectedIds.Length = 0)
+            return
+        if (selectedIds.Length > 1) {
+            MsgBox("Please select a single note to move.", "Move Note", "Icon! Owner" this.gui.Hwnd)
+            return
+        }
+
+        targetId := selectedIds[1]
+
+        ; Load all notes sorted by current SortOrder
+        storage := NoteStorage()
+        allNotes := storage.LoadAllNotes()
+
+        ; Build an ordered list of IDs as they currently appear (respecting filters would
+        ; be confusing for reordering, so we operate on the full sorted list)
+        orderedIds := []
+        for noteData in allNotes {
+            orderedIds.Push(noteData.id)
+        }
+
+        ; Find position of target note in the ordered list
+        targetPos := 0
+        for i, id in orderedIds {
+            if (id = targetId) {
+                targetPos := i
+                break
+            }
+        }
+
+        if (targetPos = 0)
+            return  ; Note not found
+
+        swapPos := targetPos + direction
+        if (swapPos < 1 || swapPos > orderedIds.Length)
+            return  ; Already at top or bottom
+
+        ; Get the two note IDs to swap
+        idA := orderedIds[targetPos]
+        idB := orderedIds[swapPos]
+
+        ; Read their current SortOrder values
+        sortA := Integer(IniRead(OptionsConfig.INI_FILE, "Note-" idA, "SortOrder", "0"))
+        sortB := Integer(IniRead(OptionsConfig.INI_FILE, "Note-" idB, "SortOrder", "0"))
+
+        ; Swap the SortOrder values
+        IniWrite(sortB, OptionsConfig.INI_FILE, "Note-" idA, "SortOrder")
+        IniWrite(sortA, OptionsConfig.INI_FILE, "Note-" idB, "SortOrder")
+
+        ; Refresh the list and re-select the moved note
+        this.PopulateNoteList()
+
+        ; Find and re-select the moved row
+        for rowNum, id in this.noteRowMap {
+            if (id = targetId) {
+                this.noteList.Modify(rowNum, "Select Focus")
+                break
+            }
+        }
+    }
+
+    MergeSelectedNotes() {
+        selectedIds := this.GetSelectedNoteIds()
+        if (selectedIds.Length < 2) {
+            MsgBox("Please select two or more notes to merge.`n`nUse Ctrl+Click to select multiple notes.", "Merge Notes", "Icon! Owner" this.gui.Hwnd)
+            return
+        }
+
+        ; Load all notes in sorted order so we know which is "top"
+        storage := NoteStorage()
+        allNotes := storage.LoadAllNotes()
+
+        ; Build sorted ID list to determine display order
+        orderedIds := []
+        for noteData in allNotes {
+            orderedIds.Push(noteData.id)
+        }
+
+        ; Sort selectedIds by their position in the sorted list
+        sortedSelected := []
+        for id in orderedIds {
+            for selId in selectedIds {
+                if (selId = id) {
+                    sortedSelected.Push(id)
+                    break
+                }
+            }
+        }
+
+        ; Confirm with user, showing which note survives
+        topId := sortedSelected[1]
+        topData := storage.LoadNote(topId)
+        if (!topData)
+            return
+
+        topPreview := StrLen(topData.content) > 60
+            ? SubStr(topData.content, 1, 57) . "..."
+            : topData.content
+
+        confirmMsg := "Merge " . sortedSelected.Length . " notes into one?`n`n"
+            . "The TOP note's properties (color, font, alarm, etc.) will be kept:`n"
+            . Chr(34) . topPreview . Chr(34) . "`n`n"
+            . "Text from the other " . (sortedSelected.Length - 1) . " note(s) will be appended, then those notes will be deleted."
+
+        if (MsgBox(confirmMsg, "Merge Notes", "YesNo Icon? Owner" this.gui.Hwnd) != "Yes")
+            return
+
+        ; Build merged content: top note text + separator + each subsequent note's text
+        sep := OptionsConfig.MERGE_SEPARATOR
+        mergedContent := topData.content
+        for i, id in sortedSelected {
+            if (i = 1)
+                continue  ; Skip the top note itself
+            noteData := storage.LoadNote(id)
+            if (!noteData)
+                continue
+            mergedContent .= sep . noteData.content
+        }
+
+        ; Update the top note's content in the INI directly
+        contentFormatted := StrReplace(mergedContent, "`r`n", "`n")
+        contentFormatted := StrReplace(contentFormatted, "`r", "`n")
+        contentFormatted := StrReplace(contentFormatted, "`n", "\n")
+        IniWrite(contentFormatted, OptionsConfig.INI_FILE, "Note-" topId, "Content")
+
+        ; Update the live note object's content if it exists in memory
+        if (app.noteManager.notes.Has(topId)) {
+            app.noteManager.notes[topId].content := mergedContent
+        }
+
+        ; Mark all other selected notes as deleted
+        deletedTime := FormatTime(A_Now, "yyyyMMddHHmmss")
+        for i, id in sortedSelected {
+            if (i = 1)
+                continue
+            IniWrite(deletedTime, OptionsConfig.INI_FILE, "Note-" id, "DeletedTime")
+            ; Destroy the live GUI if it exists
+            if (app.noteManager.notes.Has(id)) {
+                app.noteManager.notes[id].isBeingDeleted := true
+                app.noteManager.notes[id].Destroy()
+                app.noteManager.notes.Delete(id)
+            }
+        }
+
+        ; Refresh the list
+        this.PopulateNoteList()
+
+        ; Re-select the surviving note
+        for rowNum, id in this.noteRowMap {
+            if (id = topId) {
+                this.noteList.Modify(rowNum, "Select Focus")
+                break
+            }
+        }
+
+        ; Optionally open the editor so the user can review the merged result
+        if (OptionsConfig.MERGE_OPEN_EDITOR) {
+            ; Reload the note from storage to get fresh merged content, then open editor
+            if (app.noteManager.notes.Has(topId)) {
+                app.noteManager.notes[topId].Edit()
+            } else {
+                ; Note wasn't visible (was hidden), load it now
+                noteData := storage.LoadNote(topId)
+                if (noteData) {
+                    newNote := Note(topId, noteData)
+                    app.noteManager.notes[topId] := newNote
+                    newNote.Edit()
+                }
+            }
+        }
+    }
+
     ResizeControls() {
         try {
             ; Get current CLIENT area width and Height
@@ -4691,7 +4977,7 @@ class MainWindow {
             lvY := 0
             this.noteList.GetPos(&lvX, &lvY)
             
-            ; Reserve space for bottom buttons (assuming ~100px needed)
+            ; Reserve space for bottom buttons (3 rows x ~28px + gaps = ~100px)
             bottomButtonSpace := 100
             
             ; Calculate new height
@@ -4739,22 +5025,28 @@ class MainWindow {
                 this.topButtons[4].Move(leftX, , fullWidth)
             }
             
-            ; Update bottom buttons
+            ; Update move up/merge/down buttons (1st bottom row, third-width each)
+            if (this.moveButtons.Length >= 3) {
+                thirdW := Floor((fullWidth - spacing * 2) / 3)
+                this.moveButtons[1].Move(10, buttonY, thirdW)
+                this.moveButtons[2].Move(10 + thirdW + spacing, buttonY, thirdW)
+                this.moveButtons[3].Move(10 + thirdW * 2 + spacing * 2, buttonY, thirdW)
+            }
+
+            ; Update bottom buttons (2nd and 3rd rows)
             if (this.botButtons.Length >= 6) {
-                ; Use same positions as top buttons
                 leftX := 10
                 midX := leftX + buttonW + spacing
                 rightX := leftX + (buttonW * 2) + (spacing * 2)
-                
-                ; First row
+
+                ; Second row
+                buttonY += 28
                 this.botButtons[1].Move(leftX, buttonY, buttonW)
                 this.botButtons[2].Move(midX, buttonY, buttonW)
                 this.botButtons[3].Move(rightX, buttonY, buttonW)
-                
-                ; Second row Y position
-                buttonY += 35  ; Height of button + spacing
-                
-                ; Second row
+
+                ; Third row
+                buttonY += 28
                 this.botButtons[4].Move(leftX, buttonY, buttonW)
                 this.botButtons[5].Move(midX, buttonY, buttonW)
                 this.botButtons[6].Move(rightX, buttonY, buttonW)

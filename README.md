@@ -129,3 +129,7 @@ Screenshot explanation:
 14.	Select a note from the list and right-click for a two-second pop up preview.  List row colors match note back and font colors.  Left double-click to toggle visibility of note.  Note: You might need to unhide a note before editing or deleting it.  Drag edge of Note Manager window to resize the list and show more notes.  List is sorted by first column which is creation date.  Column two shows note text.  If any deleted notes are shown, then column two will have Deletion date/time stamp preceding the note text.  Column three has the Alarm date and/or time, and lists the stuck-to window.   
 15.	The buttons on the bottom are for mostly ‘note-level’ commands.  You can Ctrl+Click to select multiple items.  Multi-selected items can be bulk hidden/unhidden or deleted.
 16.	System tray icon right click menu has a few options such as ‘Start with Windows’ and ‘Open Note ini File.’
+
+# Added 9-7-2026 Hyperlink and Image integration.  
+See ScreenSnip repo.  You can snip a screenshot, then send it to a sticky note via the snip's context menu. 
+![screenshot of note with link and image](https://github.com/kunkel321/Stickies/blob/main/note%20and%20editor%20showing%20link%20and%20image.png)

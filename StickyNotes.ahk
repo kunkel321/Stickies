@@ -1,4 +1,4 @@
-﻿#Requires AutoHotkey v2.0
+#Requires AutoHotkey v2.0
 #SingleInstance Force
 
 ; Every relative path in this script -- the notes ini, the icon, the Sounds
@@ -18,7 +18,7 @@ SetWorkingDir(A_ScriptDir)
 * Project:          Sticky Notes
 * Author:           kunkel321
 * Tool used:        Claude AI
-* Version:          9-7-2026
+* Version:          9-10-2026
 * AHK Forum:        https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 * Donation Coder:   https://www.donationcoder.com/forum/index.php?topic=55548
 * Repository:       https://github.com/kunkel321/Stickies     
@@ -76,6 +76,9 @@ Features, Functionality, Usage, and Tips:
 - > No date + no time + weekly recurrence: note appears in morning on recurring weekdays
 - > No date + time + no weekly recurrence: plays at specified time
 - > No date + time + weekly recurrence: plays at specified time on recurring days
+- "Stop Alarm" on a note's right-click menu ends the current firing: sound, shake and all remaining repeats
+- Hiding a note while its alarm is going off stops the alarm too, rather than the note popping straight back
+- Repeats are spaced by ALARM_REPEAT_GAP_SECONDS so a 10x alarm doesn't empty into the first two seconds
 - Main window with note management, preview, and search functionality
 - Color-coded notes: Notes maintain their color scheme in preview list
 - Rich preview: Right-click notes in manager for formatted preview with original fonts/colors
@@ -114,6 +117,9 @@ Features, Functionality, Usage, and Tips:
 - Images are copied into the Images subfolder, so notes stay portable if the app folder moves
 - Clicking an embedded image can open it full size, open the editor, or do nothing (IMAGE_CLICK_ACTION)
 - Unreferenced images are purged after X days (see IMAGE_PURGE_DAYS)
+- Images are flattened onto the note's background, so transparent PNGs blend in instead of going black
+- Fake-transparent corners (ScreenSnip's rotate fills them magenta) are swapped for the note background too
+- See IMAGE_TRANSPARENT_COLOR and IMAGE_TRANSPARENT_TOLERANCE; set the colour to "" to switch it off
 - Hyperlinks: [url=address]display text[/url] or [url]address[/url] makes a clickable link
 - Bare addresses become clickable automatically: http:// https:// ftp:// www.
 - Bare mailto: addresses, plain email addresses, D:\folder\file paths and \\server\share paths too
@@ -193,6 +199,16 @@ class OptionsConfig {
     ;   "none" = nothing
     static IMAGE_CLICK_ACTION    := "none"
     static IMAGE_PURGE_DAYS      := 5       ; Delete unreferenced images older than this many days. 0 = never.
+    ; Fake transparency.  Some tools -- ScreenSnip's rotate, for one -- have no
+    ; real alpha channel to work with, so they fill the leftover corners with a
+    ; colour nobody would use on purpose and then key that colour out at display
+    ; time.  A Windows picture control has no colour key, so those corners would
+    ; otherwise turn up in a note as bright pink triangles.  Any pixel within
+    ; TOLERANCE of this colour is painted with the note's own background colour
+    ; instead, before the image ever reaches the control.
+    ; Set the colour to "" to switch it off and show images exactly as stored.
+    static IMAGE_TRANSPARENT_COLOR     := "FF00FF"  ; RRGGBB, magenta. "" = off.
+    static IMAGE_TRANSPARENT_TOLERANCE := 24        ; Per channel. 0 = exact match only.
     ; Pasting an image from the clipboard into the note editor.  Works with
     ; ScreenSnip, Snipping Tool, Greenshot, a browser's Copy Image, and with
     ; image files copied in Explorer.  The Paste Image button always pastes
@@ -225,6 +241,10 @@ class OptionsConfig {
     static MANAGER_DEFAULT_HEIGHT   := 535
     static UNTIMED_ALARM_START_HOUR := 4   ; When untimed alarms begin to appear (24-hour format)
     static UNTIMED_ALARM_END_HOUR   := 10  ; When untimed alarms stop appearing (24-hour format)
+    ; Seconds between the repeats of a multi-repeat alarm (the 3x and 10x
+    ; options).  The alarm's minute is one long window, so without a gap the
+    ; repeats all land in the first second or two.
+    static ALARM_REPEAT_GAP_SECONDS := 4
     ; Visual shake for alarms settings.
     static DEFAULT_ALARM_SHAKE   := true    ; Whether alarms shake by default.
     static SHAKE_STEPS           := 80      ; Number of shakes (40 takes about 3 seconds, depending on computer).
@@ -446,7 +466,27 @@ class StickyNotes {
     hasStuckNotes := false
     snipTimer := ""     ; single reusable callback for the ScreenSnip handoff
 
-    static cycleComplete := Map() 
+    ; -----------------------------------------------------------------
+    ; ALARM CYCLE TRACKING
+    ;
+    ; These are INSTANCE properties.  cycleComplete used to be declared
+    ; `static`, but CheckAlarms runs on the app instance and an instance
+    ; never sees a class static -- so `this.cycleComplete := Map()` quietly
+    ; created a second, separate Map, and every `StickyNotes.cycleComplete`
+    ; elsewhere in the file was clearing the empty one.
+    ;
+    ; cycleComplete maps a note id to the cycle KEY it has finished, not to
+    ; a bare true.  The key is the date plus the alarm's clock minute, so it
+    ; stops matching by itself when the minute rolls over.  The old code set
+    ; the flag true and then deleted it two lines later, which is what let a
+    ; finished alarm restart every couple of seconds for the rest of its
+    ; minute -- roughly thirty times -- with Stop Alarm powerless against it.
+    ; -----------------------------------------------------------------
+    cycleComplete := Map()   ; note id -> cycle key already finished
+    activeCycle   := Map()   ; note id -> cycle key currently being played
+    playCount     := Map()   ; note id -> repeats played in this cycle
+    lastPlayTime  := Map()   ; note id -> A_Now of the last repeat
+    
     
     __New() {
         this.InitializeComponents()
@@ -853,39 +893,34 @@ class StickyNotes {
         this.UpdateWindowFollowing()  ; Add this line
     }
 
+    ; Forgets everything this app knows about a note's alarm firing, so the
+    ; next matching minute starts from scratch.  Called after an alarm is
+    ; edited or deleted.
     ResetNoteAlarmCycle(noteId) {
-        ; Check if the key exists before trying to delete it
-        if (this.cycleComplete && this.cycleComplete.Has(noteId)) {
-            this.cycleComplete.Delete(noteId)
-        }
-        
-        ; Also handle the other tracking maps
-        if (this.playCount && this.playCount.Has(noteId)) {
-            this.playCount.Delete(noteId)
-        }
-        
-        if (this.lastPlayTime && this.lastPlayTime.Has(noteId)) {
-            this.lastPlayTime.Delete(noteId)
+        for tracker in [this.cycleComplete, this.activeCycle, this.playCount, this.lastPlayTime] {
+            if (tracker && tracker.Has(noteId))
+                tracker.Delete(noteId)
         }
     }
 
+    ; ---------------------------------------------------------------------
+    ; CheckAlarms -- runs once a second.
+    ;
+    ; The thing to understand here is that an alarm's trigger condition stays
+    ; TRUE for a whole minute: "9:00 AM" matches on all sixty ticks of that
+    ; minute.  So the guard that says "this one has already gone off" has to
+    ; survive the entire minute.  It used to be set and then deleted three
+    ; lines later, so the alarm fired again roughly every two seconds until
+    ; the clock rolled over -- about thirty sounds and thirty shake timers,
+    ; with Stop Alarm silencing one of them at a time and losing the race.
+    ;
+    ; The guard is now the cycle KEY -- date plus the alarm's minute -- which
+    ; simply stops matching when the minute is over.  Nothing has to be
+    ; deleted, so nothing can be deleted too early.
+    ; ---------------------------------------------------------------------
     CheckAlarms() {
-        ; Keep these maps at class level to preserve state
-        if (!this.HasOwnProp("playCount"))
-            this.playCount := Map()
-        if (!this.HasOwnProp("lastPlayTime"))
-            this.lastPlayTime := Map()
-        if (!this.HasOwnProp("cycleComplete"))
-            this.cycleComplete := Map()
-
-        ResetNoteAlarmCycle(noteId) {
-            this.cycleComplete.Delete(noteId)
-            this.playCount.Delete(noteId)
-            this.lastPlayTime.Delete(noteId)
-        }
-        
         currentTime := FormatTime(, "h:mm tt")
-        currentDay := FormatTime(, "ddd")
+        currentDay  := FormatTime(, "ddd")
         currentDate := FormatTime(, "yyyyMMdd")
         
         ; Convert current day to short format using the centralized day map
@@ -897,44 +932,29 @@ class StickyNotes {
         ; First collect notes with active alarms
         activeAlarms := []
         for id, note in this.noteManager.notes {
-            if (!note.hasAlarm)
-                continue
-
-            ; Only log when alarm state changes
-            static lastAlarmState := Map()
-            if (!lastAlarmState.Has(id) || lastAlarmState[id] != note.hasAlarm) {
-                lastAlarmState[id] := note.hasAlarm
-            }
-
-            ; Reset tracking if alarm time has changed
-            if (this.playCount.Has(id)) {
-                if (note.alarmTime != FormatTime(this.lastPlayTime[id], "h:mm tt")) {
-                    ; Clean up tracking maps - check before deleting
-                    if (this.playCount && this.playCount.Has(id))
-                        this.playCount.Delete(id)
-                    if (this.lastPlayTime && this.lastPlayTime.Has(id))
-                        this.lastPlayTime.Delete(id)
-                    if (this.cycleComplete && this.cycleComplete.Has(id))
-                        this.cycleComplete.Delete(id)
-                }
-            }
-            
-            activeAlarms.Push({id: id, note: note})
+            if (note.hasAlarm)
+                activeAlarms.Push({id: id, note: note})
         }
-
+        
         ; If no active alarms, we can return early
         if (activeAlarms.Length = 0)
             return
-
+        
         ; Process only notes with active alarms
         for alarmNote in activeAlarms {
             id := alarmNote.id
             note := alarmNote.note
             
-            ; Check if we've already handled this alarm cycle
-            if (this.cycleComplete.Has(id) && this.cycleComplete[id]) {
+            ; Names this particular firing.  A timed alarm gets a new key when
+            ; the clock minute changes; an untimed one when the day does.
+            cycleKey := note.hasAlarmTime
+                ? (currentDate "-" note.alarmTime)
+                : (currentDate "-morning")
+            
+            ; Already dealt with, either by playing it out or by the user
+            ; stopping it.  Expires on its own when cycleKey changes.
+            if (this.cycleComplete.Has(id) && this.cycleComplete[id] = cycleKey)
                 continue
-            }
             
             ; Check date-based alarms
             if (note.alarmDate) {
@@ -973,89 +993,91 @@ class StickyNotes {
                 continue
             }
             
-            ; Initialize play count for this note if needed
-            if (!this.playCount.Has(id)) {
-                this.playCount[id] := 0
+            ; ---- The alarm is due. ----
+            
+            ; A firing we haven't seen before: start its counters clean.
+            if (!this.activeCycle.Has(id) || this.activeCycle[id] != cycleKey) {
+                this.activeCycle[id]  := cycleKey
+                this.playCount[id]    := 0
+                this.lastPlayTime[id] := ""
+                note.alarmSilenced    := false
+            }
+            
+            ; Stop Alarm (or Hide) was chosen while this one was sounding.
+            ; Retire the firing exactly as if the repeats had run out, which
+            ; is what would have happened a few seconds later anyway.
+            if (note.alarmSilenced) {
+                note.alarmSilenced := false
+                this.FinishAlarmCycle(id, note, cycleKey)
+                continue
+            }
+            
+            ; An untimed alarm has nothing to repeat -- it just shows itself.
+            if (!note.hasAlarmTime) {
+                note.Show()
+                this.FinishAlarmCycle(id, note, cycleKey)
+                continue
+            }
+            
+            ; The first repeat plays immediately; later ones are spaced out,
+            ; otherwise a 10x alarm empties itself into the first two seconds.
+            due := (this.playCount[id] = 0)
+                || (this.lastPlayTime[id] = "")
+                || (DateDiff(A_Now, this.lastPlayTime[id], "Seconds")
+                    >= OptionsConfig.ALARM_REPEAT_GAP_SECONDS)
+            if (!due)
+                continue
+            
+            if (this.playCount[id] < note.alarmRepeatCount) {
+                Debug("Alarm for note " id ": repeat " (this.playCount[id] + 1) " of " note.alarmRepeatCount)
+                note.HandleAlarm()
+                this.playCount[id]++
                 this.lastPlayTime[id] := A_Now
             }
             
-            ; Check if enough time has passed since last play
-            if (A_Now - this.lastPlayTime[id] >= 0.1) {
-                Debug("Current play count: " (this.playCount.Has(id) ? this.playCount[id] : 0) " of " note.alarmRepeatCount)
-                
-                ; For no-time alarms, just show the note
-                if (!note.hasAlarmTime) {
-                    note.Show()
-                    this.cycleComplete[id] := true
-                    
-                    ; If it's a one-time alarm without recurrence, remove it
-                    if (!note.alarmDays) {
-                        note.hasAlarm := false
-                        note.alarmDate := ""
-                        
-                        ; Update button text if editor is open
-                        if (note.editor) {
-                            note.editor.addAlarmBtn.Text := "Add &Alarm..."
-                        }
-                        
-                        storage := NoteStorage()
-                        storage.SaveNote(note)
-                    }
-                    
-                    ; Update last play date
-                    note.lastPlayDate := FormatTime(A_Now, "yyyyMMdd")
-                    storage := NoteStorage()
-                    storage.SaveNote(note)
-                    
-                    continue
-                }
-                
-                ; For time-based alarms, handle sound and visual effects
-                if (!this.playCount.Has(id) || this.playCount[id] < note.alarmRepeatCount) {
-                    ; Trigger the alarm
-                    note.HandleAlarm()
-                    
-                    ; Initialize or increment play count
-                    if (!this.playCount.Has(id)) {
-                        this.playCount[id] := 1
-                    } else {
-                        this.playCount[id]++
-                    }
-                    
-                    this.lastPlayTime[id] := A_Now
-                }
-                
-                ; Check if we've finished all repeats
-                if (this.playCount.Has(id) && this.playCount[id] >= note.alarmRepeatCount) {
-                    this.cycleComplete[id] := true
-                    
-                    ; If it's a one-time alarm without recurrence, remove it
-                    if (!note.alarmDays) {
-                        note.hasAlarm := false
-                        note.alarmDate := ""
-                        note.alarmTime := ""
-                        note.alarmSound := ""
-                        note.alarmRepeatCount := 1
-                        
-                        ; Update button text if editor is open
-                        if (note.editor) {
-                            note.editor.addAlarmBtn.Text := "Add &Alarm..."
-                        }
-                        
-                        storage := NoteStorage()
-                        storage.SaveNote(note)
-                    }
-                    
-                    ; Clean up tracking maps - check before deleting
-                    if (this.playCount && this.playCount.Has(id))
-                        this.playCount.Delete(id)
-                    if (this.lastPlayTime && this.lastPlayTime.Has(id))
-                        this.lastPlayTime.Delete(id)
-                    if (this.cycleComplete && this.cycleComplete.Has(id))
-                        this.cycleComplete.Delete(id)
-                }
-            }
+            ; Finished all the repeats?
+            if (this.playCount[id] >= note.alarmRepeatCount)
+                this.FinishAlarmCycle(id, note, cycleKey)
         }
+    }
+    
+    ; ---------------------------------------------------------------------
+    ; FinishAlarmCycle -- retires one firing of a note's alarm.
+    ;
+    ; The completed key is REMEMBERED rather than deleted: it is the only
+    ; thing standing between this note and a re-trigger on the very next
+    ; tick, since the alarm's minute has fifty-odd ticks left in it.  The
+    ; per-cycle counters go, because they belong to the firing that just
+    ; ended, and a fresh key rebuilds them.
+    ; ---------------------------------------------------------------------
+    FinishAlarmCycle(id, note, cycleKey) {
+        this.cycleComplete[id] := cycleKey
+        
+        if (this.activeCycle.Has(id))
+            this.activeCycle.Delete(id)
+        if (this.playCount.Has(id))
+            this.playCount.Delete(id)
+        if (this.lastPlayTime.Has(id))
+            this.lastPlayTime.Delete(id)
+        
+        ; A one-off alarm -- no repeating weekdays -- is spent now.
+        if (!note.alarmDays) {
+            note.hasAlarm := false
+            note.alarmDate := ""
+            if (note.hasAlarmTime) {
+                note.alarmTime := ""
+                note.alarmSound := ""
+                note.alarmRepeatCount := 1
+            }
+            
+            ; Update button text if editor is open
+            if (note.editor)
+                try note.editor.addAlarmBtn.Text := "Add &Alarm..."
+        }
+        
+        note.lastPlayDate := FormatTime(A_Now, "yyyyMMdd")
+        storage := NoteStorage()
+        storage.SaveNote(note)
     }
 
     CheckMissedAlarms() {
@@ -1942,6 +1964,202 @@ GetNoteImageSize(path, &imgW, &imgH) {
     return (imgW > 0 && imgH > 0)
 }
 
+; =========================================================================
+; FLATTENING AN IMAGE ONTO THE NOTE
+;
+; Two things can make an image look wrong in a note, and both come down to
+; the same limitation: a Windows picture control just blits pixels.  It has
+; no colour key and it does not composite an alpha channel.
+;
+;   * Fake transparency.  A tool with no alpha channel to work with -- the
+;     rotate in ScreenSnip, for one -- fills the corners it can't fill with
+;     a colour nobody would use on purpose, magenta, and keys that colour
+;     out when it displays the image itself.  Handed straight to a picture
+;     control, those corners arrive as bright pink triangles.
+;   * Real transparency.  A PNG with an alpha channel has nothing behind it
+;     here, so the see-through parts land as black.
+;
+; Both are fixed the same way: paint the note's own background colour first,
+; draw the image over it, and give the control a finished, fully opaque
+; bitmap.  The control then has nothing left to get wrong.
+; =========================================================================
+
+; Turns a note's background colour into the 0xAARRGGBB that GDI+ wants.
+; Falls back to white, which is a far less alarming wrong answer than black.
+NoteColorToArgb(colorSpec) {
+    spec := RegExReplace(Trim(colorSpec), "i)^(0x|#)", "")
+    if !RegExMatch(spec, "i)^[0-9a-f]{6}$")
+        return 0xFFFFFFFF
+    return 0xFF000000 | Integer("0x" spec)
+}
+
+; Works out the low and high corners of the colour-key range from the two
+; IMAGE_TRANSPARENT_* settings.  Returns false when keying is switched off
+; or the setting isn't a colour, in which case the image is still flattened
+; onto the note background -- just without a colour being singled out.
+;
+; The range is a box in RGB, one span per channel, so the tolerance lets in
+; the slightly-off magenta of an antialiased edge without reaching anything
+; a screenshot would plausibly contain.  Alpha is left wide open (0 to 255)
+; so the test never turns on how opaque the pixel happens to be.
+NoteTransparentKeyRange(&keyLow, &keyHigh) {
+    keyLow := 0, keyHigh := 0
+    
+    spec := Trim(OptionsConfig.IMAGE_TRANSPARENT_COLOR)
+    if (spec = "" || StrLower(spec) = "none" || StrLower(spec) = "off")
+        return false
+    
+    spec := RegExReplace(spec, "i)^(0x|#)", "")
+    if !RegExMatch(spec, "i)^[0-9a-f]{6}$") {
+        LogError("IMAGE_TRANSPARENT_COLOR is not a six digit hex colour: "
+            . OptionsConfig.IMAGE_TRANSPARENT_COLOR)
+        return false
+    }
+    
+    rgb := Integer("0x" spec)
+    r := (rgb >> 16) & 0xFF, g := (rgb >> 8) & 0xFF, b := rgb & 0xFF
+    
+    tol := OptionsConfig.IMAGE_TRANSPARENT_TOLERANCE
+    if (!IsNumber(tol) || tol < 0)
+        tol := 0
+    
+    keyLow  := (0x00 << 24)
+             | (Max(r - tol, 0) << 16) | (Max(g - tol, 0) << 8) | Max(b - tol, 0)
+    keyHigh := (0xFF << 24)
+             | (Min(r + tol, 255) << 16) | (Min(g + tol, 255) << 8) | Min(b + tol, 255)
+    return true
+}
+
+; Builds a display-ready HBITMAP for one embedded image: the file, flattened
+; onto bgColorSpec, scaled to dispW x dispH.  Returns 0 with the reason in
+; errMsg, and the caller falls back to pointing the control at the file.
+;
+; The caller must NOT free the handle it gets back -- see CreateImageControl.
+RenderNoteImageBitmap(path, dispW, dispH, bgColorSpec, &errMsg) {
+    static PixelFormat32bppARGB := 0x0026200A
+    static UnitPixel := 2
+    static ColorAdjustTypeDefault := 0
+    static InterpolationModeHighQualityBicubic := 7
+    static PixelOffsetModeHighQuality := 4
+    errMsg := ""
+    
+    if (dispW < 1 || dispH < 1) {
+        errMsg := "No display size was worked out for this image."
+        return 0
+    }
+    
+    argbBg := NoteColorToArgb(bgColorSpec)
+    token := 0, pSrc := 0, pFlat := 0, gFlat := 0, pAttr := 0
+    pOut := 0, gOut := 0, hbm := 0
+    
+    try {
+        token := GdipStart(&errMsg)
+        if (!token)
+            return 0
+        
+        status := DllCall("gdiplus\GdipCreateBitmapFromFile", "WStr", path, "Ptr*", &pSrc)
+        if (status || !pSrc) {
+            errMsg := "GDI+ could not open the image (status " status ")."
+            return 0
+        }
+        
+        srcW := 0, srcH := 0
+        DllCall("gdiplus\GdipGetImageWidth",  "Ptr", pSrc, "UInt*", &srcW)
+        DllCall("gdiplus\GdipGetImageHeight", "Ptr", pSrc, "UInt*", &srcH)
+        if (srcW < 1 || srcH < 1) {
+            errMsg := "The image reports no size of its own."
+            return 0
+        }
+        
+        ; ---- Pass 1: flatten, at the image's OWN size. ----
+        ;
+        ; Doing this at 1:1 is the whole trick.  The colour key marks matching
+        ; pixels transparent but leaves their magenta sitting underneath the
+        ; zeroed alpha, so if this draw scaled as well, the interpolation would
+        ; blend that magenta straight back into its neighbours -- a pink halo
+        ; around everything instead of pink corners.  At 1:1 no pixel is ever
+        ; mixed with another, the background shows through cleanly, and by the
+        ; time anything is scaled there is no magenta left to smear.
+        status := DllCall("gdiplus\GdipCreateBitmapFromScan0", "Int", srcW, "Int", srcH,
+            "Int", 0, "Int", PixelFormat32bppARGB, "Ptr", 0, "Ptr*", &pFlat)
+        if (status || !pFlat) {
+            errMsg := "GDI+ could not allocate the working image (status " status ")."
+            return 0
+        }
+        
+        DllCall("gdiplus\GdipGetImageGraphicsContext", "Ptr", pFlat, "Ptr*", &gFlat)
+        if (!gFlat) {
+            errMsg := "GDI+ could not get a drawing surface for the working image."
+            return 0
+        }
+        DllCall("gdiplus\GdipGraphicsClear", "Ptr", gFlat, "UInt", argbBg)
+        
+        keyLow := 0, keyHigh := 0
+        if (NoteTransparentKeyRange(&keyLow, &keyHigh)) {
+            DllCall("gdiplus\GdipCreateImageAttributes", "Ptr*", &pAttr)
+            if (pAttr)
+                DllCall("gdiplus\GdipSetImageAttributesColorKeys", "Ptr", pAttr,
+                    "Int", ColorAdjustTypeDefault, "Int", 1,
+                    "UInt", keyLow, "UInt", keyHigh)
+        }
+        
+        DllCall("gdiplus\GdipDrawImageRectRectI", "Ptr", gFlat, "Ptr", pSrc,
+            "Int", 0, "Int", 0, "Int", srcW, "Int", srcH,
+            "Int", 0, "Int", 0, "Int", srcW, "Int", srcH,
+            "Int", UnitPixel, "Ptr", pAttr, "Ptr", 0, "Ptr", 0)
+        
+        ; ---- Pass 2: scale the flattened copy to the size the note wants. ----
+        status := DllCall("gdiplus\GdipCreateBitmapFromScan0", "Int", dispW, "Int", dispH,
+            "Int", 0, "Int", PixelFormat32bppARGB, "Ptr", 0, "Ptr*", &pOut)
+        if (status || !pOut) {
+            errMsg := "GDI+ could not allocate the display image (status " status ")."
+            return 0
+        }
+        
+        DllCall("gdiplus\GdipGetImageGraphicsContext", "Ptr", pOut, "Ptr*", &gOut)
+        if (!gOut) {
+            errMsg := "GDI+ could not get a drawing surface for the display image."
+            return 0
+        }
+        DllCall("gdiplus\GdipGraphicsClear", "Ptr", gOut, "UInt", argbBg)
+        DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", gOut,
+            "Int", InterpolationModeHighQualityBicubic)
+        DllCall("gdiplus\GdipSetPixelOffsetMode", "Ptr", gOut,
+            "Int", PixelOffsetModeHighQuality)
+        
+        DllCall("gdiplus\GdipDrawImageRectRectI", "Ptr", gOut, "Ptr", pFlat,
+            "Int", 0, "Int", 0, "Int", dispW, "Int", dispH,
+            "Int", 0, "Int", 0, "Int", srcW, "Int", srcH,
+            "Int", UnitPixel, "Ptr", 0, "Ptr", 0, "Ptr", 0)
+        
+        status := DllCall("gdiplus\GdipCreateHBITMAPFromBitmap",
+            "Ptr", pOut, "Ptr*", &hbm, "UInt", argbBg)
+        if (status || !hbm) {
+            errMsg := "GDI+ could not hand over a bitmap (status " status ")."
+            return 0
+        }
+        
+        return hbm
+    } catch as err {
+        errMsg := "Image compositing failed: " err.Message
+        return 0
+    } finally {
+        if (pAttr)
+            try DllCall("gdiplus\GdipDisposeImageAttributes", "Ptr", pAttr)
+        if (gOut)
+            try DllCall("gdiplus\GdipDeleteGraphics", "Ptr", gOut)
+        if (pOut)
+            try DllCall("gdiplus\GdipDisposeImage", "Ptr", pOut)
+        if (gFlat)
+            try DllCall("gdiplus\GdipDeleteGraphics", "Ptr", gFlat)
+        if (pFlat)
+            try DllCall("gdiplus\GdipDisposeImage", "Ptr", pFlat)
+        if (pSrc)
+            try DllCall("gdiplus\GdipDisposeImage", "Ptr", pSrc)
+        GdipStop(token)
+    }
+}
+
 ; Deletes images in the images folder that no note refers to any more.
 ; Files newer than the cutoff are always kept, so an image imported into a
 ; note that hasn't been saved yet can't be swept away underneath the user.
@@ -2135,6 +2353,13 @@ class Note {
     alarmRepeatCount := 1
     visualShake := true 
     lastPlayDate := ""
+    ; Live state while an alarm is actually going off.  None of this is saved.
+    alarmSilenced := false   ; Stop Alarm was chosen; CheckAlarms retires the cycle
+    currentlyPlaying := false
+    currentWMP := ""         ; the Media Player fallback, kept so it can be stopped
+    shakeTimer := ""         ; ONE timer object per note -- see ShakeNote
+    shakeOrigin := ""        ; {x, y} the note gets put back to
+    shakeStep := 0
 
     ; window-stick properties
     isStuckToWindow := false
@@ -2581,6 +2806,7 @@ class Note {
         ; including upscaling, since asking for it is deliberate.
         maxW := (item.imgWidth > 0) ? item.imgWidth : (this.width - 10)
         sizeOpt := "w" maxW " h-1"      ; fallback: let Windows keep the aspect
+        dispW := 0, dispH := 0
         
         if GetNoteImageSize(path, &nativeW, &nativeH) {
             dispW := (item.imgWidth > 0) ? maxW : Min(nativeW, maxW)
@@ -2592,10 +2818,40 @@ class Note {
                 dispW := Round(nativeW * dispH / nativeH)
             }
             
-            sizeOpt := "w" Max(dispW, 1) " h" Max(dispH, 1)
+            dispW := Max(dispW, 1), dispH := Max(dispH, 1)
+            sizeOpt := "w" dispW " h" dispH
         }
         
-        pic := this.gui.Add("Picture", yOption "x5 " sizeOpt, path)
+        pic := ""
+        
+        ; Preferred route: hand the control a bitmap already flattened onto
+        ; this note's background, so a colour-keyed corner and a real alpha
+        ; channel both come out right.  See RenderNoteImageBitmap.
+        if (dispW > 0) {
+            renderErr := ""
+            hbm := RenderNoteImageBitmap(path, dispW, dispH, this.bgcolor, &renderErr)
+            if (hbm) {
+                ; No w or h in the options on purpose.  The bitmap is already
+                ; exactly the size wanted, and AutoHotkey throws a handed-over
+                ; image away and reloads from scratch if it has to resize it --
+                ; which would undo all of the above.
+                ;
+                ; The handle has NO asterisk after the colon, which leaves the
+                ; control owning it: AutoHotkey frees the bitmap when the note's
+                ; GUI is destroyed.  So nothing here deletes it, and the handle
+                ; is never reused.
+                try pic := this.gui.Add("Picture", yOption "x5", "HBITMAP:" hbm)
+                if (!pic)
+                    try DllCall("DeleteObject", "Ptr", hbm)   ; Add failed; it's ours again
+            } else if (renderErr != "") {
+                Debug("Image '" path "' shown straight from file: " renderErr)
+            }
+        }
+        
+        ; Fallback: the file itself, exactly as the old code did it.  A note
+        ; showing an image with pink corners still beats a note that lost it.
+        if (!pic)
+            pic := this.gui.Add("Picture", yOption "x5 " sizeOpt, path)
         
         this.controls.Push({
             control: pic,
@@ -2999,10 +3255,39 @@ class Note {
         noteMenu.Show()
     }
     
-    StopSound(*) {
-        ; Always try to stop any playing sound, regardless of tracking flag
-        try SoundPlay("nonexistent.wav")
+    ; Kept under its old name because the context menu binds to it.
+    StopSound(*) => this.StopAlarm()
+    
+    ; ---------------------------------------------------------------------
+    ; StopAlarm -- what "Stop Alarm" on the note's right-click menu does.
+    ;
+    ; There are three separate things going on during an alarm and the old
+    ; version only addressed the first, which is why the menu item appeared
+    ; to do nothing:
+    ;
+    ;   1. the sound       -- and its Media Player fallback, a second player
+    ;                         that SoundPlay has no authority over
+    ;   2. the shake timer
+    ;   3. the alarm CYCLE -- the important one.  Silencing 1 and 2 without
+    ;                         3 bought about two seconds, because the next
+    ;                         CheckAlarms tick started the whole thing again.
+    ; ---------------------------------------------------------------------
+    StopAlarm(*) {
+        ; SoundPlay closes whatever it already had open before it tries the
+        ; new file, so naming a file that cannot exist stops the current one.
+        ; The error it raises afterwards is the expected outcome, not a fault.
+        try SoundPlay(A_ScriptDir "\--stop-alarm--.wav")
         this.currentlyPlaying := false
+        
+        if (this.currentWMP) {
+            try this.currentWMP.Controls.stop()
+            this.currentWMP := ""
+        }
+        
+        this.StopShake()
+        
+        ; Read on the next tick of CheckAlarms, which retires this firing.
+        this.alarmSilenced := true
     }
 
     SaveCheckboxState(ctrl, *) {
@@ -3073,11 +3358,15 @@ class Note {
         if (!this.hasAlarm)
             return
                 
-        ; Show the note if it's hidden
+        ; Show the note if it's hidden.  The ini has to be told as well, or
+        ; the note is on screen while its stored state still says hidden.
         this.Show()
+        (NoteStorage()).MarkNoteVisible(this.id)
         
         ; Only trigger sound and shake for time-based alarms
         if (this.hasAlarmTime) {
+            this.currentlyPlaying := true
+            
             ; Trigger shake effect if enabled
             if (this.visualShake)
                 this.ShakeNote()
@@ -3087,12 +3376,16 @@ class Note {
                 try {
                     SoundPlay(this.alarmSound, 1)
                 } catch Error as err {
-                    ; If SoundPlay fails, try Windows Media Player as fallback
+                    ; If SoundPlay fails, try Windows Media Player as fallback.
+                    ; Held on the note rather than in a local, so Stop Alarm has
+                    ; something to call .stop() on -- a local player just kept
+                    ; playing with nothing left pointing at it.
                     try {
-                        wmp := ComObject("WMPlayer.OCX.7")
-                        wmp.URL := this.alarmSound
-                        wmp.Controls.play()
+                        this.currentWMP := ComObject("WMPlayer.OCX.7")
+                        this.currentWMP.URL := this.alarmSound
+                        this.currentWMP.Controls.play()
                     } catch {
+                        this.currentWMP := ""
                         LogError("Failed to play alarm sound: " this.alarmSound)
                     }
                 }
@@ -3115,10 +3408,14 @@ class Note {
                 this.alarmDays := ""
                 this.alarmRepeatCount := 1
                 
-                ; Force reset of cycle state - only if key exists
-                if (StickyNotes.cycleComplete && StickyNotes.cycleComplete.Has(this.id)) {
-                    StickyNotes.cycleComplete.Delete(this.id)
-                }
+                ; The alarm may be going off right now.
+                this.StopAlarm()
+                this.alarmSilenced := false
+                
+                ; Force reset of cycle state.  These live on the app INSTANCE
+                ; -- the old StickyNotes.cycleComplete was a class static that
+                ; CheckAlarms never looked at, so this cleared nothing.
+                app.ResetNoteAlarmCycle(this.id)
                 
                 ; Save changes to storage
                 storage := NoteStorage()
@@ -3134,32 +3431,80 @@ class Note {
         }
     }
 
+    ; ---------------------------------------------------------------------
+    ; ShakeNote / StopShake / PerformShake
+    ;
+    ; The timer object and the step counter now live on the note.  Both used
+    ; to be a problem:
+    ;
+    ;   * .Bind() hands back a BRAND NEW object every call, and SetTimer
+    ;     identifies a timer by that object -- so every repeat of an alarm
+    ;     started an ADDITIONAL timer instead of restarting the one that was
+    ;     already running.  Stopping "the" timer stopped one of them.
+    ;   * shakeStep, originalX and originalY were `static`, meaning shared by
+    ;     every one of those timers and by every note.  They fought over the
+    ;     counter, and each re-entry re-read "original" position from wherever
+    ;     the note happened to be mid-shake, so it walked across the desktop.
+    ;
+    ; One note, one timer, one remembered home position.
+    ; ---------------------------------------------------------------------
     ShakeNote() {
-        this.isShaking := false  ; Class property to track shake state
+        this.StopShake()   ; restart rather than stack
         
-        ; Create a bound function for the timer to use
-        boundShake := this.PerformShake.Bind(this)
-        SetTimer(boundShake, 10)  ; Start immediately
+        targetGui := this.borderGui ? this.borderGui.Gui1 : this.gui
+        try {
+            targetGui.GetPos(&ox, &oy)
+        } catch as err {
+            LogError("ShakeNote: could not read the note position: " err.Message)
+            return
+        }
+        
+        this.shakeOrigin := {x: ox, y: oy}
+        this.shakeStep := 0
+        this.shakeTimer := this.PerformShake.Bind(this)
+        SetTimer(this.shakeTimer, 10)
     }
-
+    
+    ; Ends the animation and puts the note back where it started.  Safe to
+    ; call at any time, including when nothing is shaking.
+    StopShake() {
+        if (this.shakeTimer) {
+            try SetTimer(this.shakeTimer, 0)
+            this.shakeTimer := ""
+        }
+        
+        if (this.shakeOrigin) {
+            try {
+                targetGui := this.borderGui ? this.borderGui.Gui1 : this.gui
+                if (targetGui)
+                    WinMove(this.shakeOrigin.x, this.shakeOrigin.y, , , targetGui)
+            } catch as err {
+                LogError("StopShake: could not restore the note position: " err.Message)
+            }
+            this.shakeOrigin := ""
+        }
+        
+        this.shakeStep := 0
+    }
+    
     ; handle the actual shake animation:
     PerformShake() {
-        static shakeStep := 0
-        static originalX := 0
-        static originalY := 0
-        
         try {
-            targetGui := this.borderGui ? this.borderGui.Gui1 : this.gui
+            ; StopShake cleared these out from under us -- nothing to do.
+            if (!this.shakeTimer || !this.shakeOrigin)
+                return
             
-            ; Initialize on first step
-            if (!this.isShaking) {
-                this.isShaking := true
-                targetGui.GetPos(&originalX, &originalY)
-                shakeStep := 0
+            targetGui := this.borderGui ? this.borderGui.Gui1 : this.gui
+            if (!targetGui) {
+                this.StopShake()
+                return
             }
             
+            originalX := this.shakeOrigin.x
+            originalY := this.shakeOrigin.y
+            
             ; Calculate diminishing shake distance
-            progress := shakeStep / OptionsConfig.SHAKE_STEPS
+            progress := this.shakeStep / OptionsConfig.SHAKE_STEPS
             range := OptionsConfig.MAX_SHAKE_DISTANCE - OptionsConfig.MIN_SHAKE_DISTANCE
             shakeDistance := Max(
                 OptionsConfig.MIN_SHAKE_DISTANCE,
@@ -3167,33 +3512,33 @@ class Note {
             )
             
             ; Calculate new position based on step
-            Switch Mod(shakeStep, 4) {
+            Switch Mod(this.shakeStep, 4) {
                 Case 0: WinMove(originalX + shakeDistance, originalY,,, targetGui)
                 Case 1: WinMove(originalX - shakeDistance, originalY,,, targetGui)
                 Case 2: WinMove(originalX, originalY - shakeDistance,,, targetGui)
                 Case 3: WinMove(originalX, originalY + shakeDistance,,, targetGui)
             }
             
-            shakeStep++
+            this.shakeStep++
             
-            ; Stop after configured number of steps
-            if (shakeStep >= OptionsConfig.SHAKE_STEPS) {
-                ; Return to original position
-                WinMove(originalX, originalY,,, targetGui)
-                this.isShaking := false
-                shakeStep := 0
-                SetTimer(, 0)  ; Stop timer
-                return
-            }
+            ; Stop after configured number of steps.  StopShake does the
+            ; move back to the original position.
+            if (this.shakeStep >= OptionsConfig.SHAKE_STEPS)
+                this.StopShake()
             
         } catch as err {
             LogError("Error in PerformShake: " err.Message)
-            SetTimer(, 0)  ; Stop timer on error
-            return
+            this.StopShake()
         }
     }
 
     UpdateContent(newContent, options := "") {
+        ; Settle any shake FIRST.  The GUI below is about to be destroyed and
+        ; rebuilt, and a live shake timer would be left holding a dead window
+        ; -- and the position read a few lines down would be a mid-wobble one,
+        ; which is how an edited note used to drift.
+        this.StopShake()
+        
         ; Store current position and border state
         x := 0
         y := 0
@@ -3249,6 +3594,13 @@ class Note {
     }
 
     Hide(*) {
+        ; Hiding a note that is in the middle of an alarm has to stop the
+        ; alarm too.  HandleAlarm calls Show(), so otherwise the note was
+        ; back on screen -- still ringing -- a second later, which is why
+        ; "Hide this Note" looked broken during an alarm.
+        if (this.hasAlarm)
+            this.StopAlarm()
+        
         if (this.borderGui && this.borderGui.Gui1) {
             ; If note has a border, hide the border GUI (child will hide automatically)
             this.borderGui.Gui1.Hide()
@@ -3283,8 +3635,9 @@ class Note {
                 this.isBeingDeleted := true
                 
                 ; Clean up alarm state if it exists
-                if (this.hasAlarm && StickyNotes.cycleComplete && StickyNotes.cycleComplete.Has(this.id)) {
-                    StickyNotes.cycleComplete.Delete(this.id)
+                if (this.hasAlarm) {
+                    this.StopAlarm()
+                    app.ResetNoteAlarmCycle(this.id)
                 }
 
                 ; Clean up border if it exists
@@ -3303,6 +3656,14 @@ class Note {
     
     Destroy(*) {
         try {
+            ; Nothing may be left pointing at this note's windows -- a shake
+            ; timer that outlives them would fire against dead HWNDs.
+            this.StopShake()
+            if (this.currentWMP) {
+                try this.currentWMP.Controls.stop()
+                this.currentWMP := ""
+            }
+            
             ; Release the window-scoped hotkeys before the HWNDs go away
             this.UnregisterNoteHotkeys()
             
@@ -5344,20 +5705,25 @@ class AlarmDialog {
     }
 
     StopSound(*) {
-        try if (this.currentlyPlaying) {
-            try SoundPlay("nonexistent.wav")
-            this.currentlyPlaying := false
+        ; Unconditional: currentlyPlaying is false whenever SoundPlay threw
+        ; and the Media Player fallback took over, which is exactly the case
+        ; that most needs stopping.
+        try SoundPlay(A_ScriptDir "\--stop-alarm--.wav")
+        this.currentlyPlaying := false
+        
+        if (this.currentWMP) {
+            try this.currentWMP.Controls.stop()
+            this.currentWMP := ""
         }
     }
     
     SaveAlarm(*) {
-        ; Instead of directly calling app.ResetNoteAlarmCycle,
-        ; check if StickyNotes.cycleComplete exists and access it directly
+        ; Reset the cycle state so an edited alarm can fire again today.
+        ; This used to poke StickyNotes.cycleComplete -- a class static that
+        ; CheckAlarms, which runs on the app instance, never reads.
         try {
-            ; Reset the cycle state if the app's cycleComplete exists
-            if (StickyNotes.HasOwnProp("cycleComplete") && StickyNotes.cycleComplete.Has(this.note.id)) {
-                StickyNotes.cycleComplete.Delete(this.note.id)
-            }
+            app.ResetNoteAlarmCycle(this.note.id)
+            this.note.alarmSilenced := false
         } catch as err {
             LogError("Error resetting alarm cycle state: " err.Message)
         }
@@ -5458,10 +5824,13 @@ class AlarmDialog {
                 this.note.alarmDays := ""
                 this.note.alarmRepeatCount := 1
                 
-                ; Force reset of cycle state
-                if (StickyNotes.cycleComplete && StickyNotes.cycleComplete.Has(this.note.id)) {
-                    StickyNotes.cycleComplete.Delete(this.note.id)
-                }
+                ; The alarm may be sounding as we speak.
+                this.note.StopAlarm()
+                this.note.alarmSilenced := false
+                
+                ; Force reset of cycle state (see SaveAlarm for why this
+                ; goes through the app instance rather than the class).
+                app.ResetNoteAlarmCycle(this.note.id)
                 
                 ; Save changes to storage
                 storage := NoteStorage()
@@ -6009,6 +6378,20 @@ class MainWindow {
         t .= "set to '" OptionsConfig.IMAGE_CLICK_ACTION "'." nl nl
         t .= "Images that no note refers to any more are deleted after " OptionsConfig.IMAGE_PURGE_DAYS nl
         t .= "days." nl nl
+        t .= "An image is painted onto the note's own background colour before" nl
+        t .= "it is shown, so a transparent PNG blends in instead of going" nl
+        t .= "black.  Tools with no alpha channel to work with -- ScreenSnip's" nl
+        t .= "rotate, for one -- fake it by filling the leftover corners with" nl
+        if (Trim(OptionsConfig.IMAGE_TRANSPARENT_COLOR) != "") {
+            t .= "magenta.  That colour is swapped for the note background" nl
+            t .= "too, so the corners vanish instead of showing up pink." nl
+            t .= "IMAGE_TRANSPARENT_COLOR is set to " OptionsConfig.IMAGE_TRANSPARENT_COLOR "; set it" nl
+            t .= 'to "" to leave images exactly as they are stored.' nl nl
+        } else {
+            t .= "magenta.  IMAGE_TRANSPARENT_COLOR is switched off, so those" nl
+            t .= "corners show up as they are stored.  Set it to FF00FF to have" nl
+            t .= "them replaced with the note background." nl nl
+        }
 
         t .= "=== STICKY NOTES ===" nl nl
         t .= "The top center strip of a note is its drag area.  Drag there" nl

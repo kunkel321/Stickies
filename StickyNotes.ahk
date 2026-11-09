@@ -18,7 +18,7 @@ SetWorkingDir(A_ScriptDir)
 * Project:          Sticky Notes
 * Author:           kunkel321
 * Tool used:        Claude AI
-* Version:          9-10-2026
+* Version:          11-9-2026
 * AHK Forum:        https://www.autohotkey.com/boards/viewtopic.php?f=83&t=135340
 * Donation Coder:   https://www.donationcoder.com/forum/index.php?topic=55548
 * Repository:       https://github.com/kunkel321/Stickies     
@@ -3994,23 +3994,31 @@ class NoteManager {
     }
 
     DeleteNote(id) {
-        if !this.notes.Has(id) {
+        ; A hidden note without an alarm has no Note object (and so no entry in
+        ; this.notes) after a restart, but it still lives in the ini.  Existence
+        ; is therefore decided by storage, NOT by this.notes -- checking this.notes
+        ; made deleting such a note fail silently.
+        if (!this.storage.NoteExists(id))
             return false
-        }
+        ; Already deleted: leave the original DeletedTime alone so the purge
+        ; clock isn't restarted.
+        if (this.storage.IsNoteDeleted(id))
+            return false
         try {
-            ; Get note reference
-            note := this.notes[id]
-            
-            ; Remove from storage first
-            this.storage.DeleteNote(id)
-            
-            ; Destroy note and all its resources
-            note.Destroy()
-            
-            ; Remove from collection and clear reference
-            this.notes.Delete(id)
-            note := ""
-            
+            ; Mark as deleted in storage first (works with or without a window)
+            if (!this.storage.DeleteNote(id)) {
+                LogError("NoteManager.DeleteNote: storage refused to delete note " id)
+                return false
+            }
+
+            ; Destroy the window and remove from the collection, if there is one
+            if (this.notes.Has(id)) {
+                note := this.notes[id]
+                note.Destroy()
+                this.notes.Delete(id)
+                note := ""
+            }
+
             ; Update main window list if it exists
             if (this.mainWindow)
                 this.mainWindow.PopulateNoteList()
@@ -6799,9 +6807,10 @@ class MainWindow {
                 if (!OptionsConfig.WARN_ON_DELETE_NOTE) {
                     ; Skip warning if disabled
                     this.gui.Opt("+Disabled")  ; Prevent user interaction during deletion
-                    app.noteManager.DeleteNote(selectedIds[1])
+                    deleted := app.noteManager.DeleteNote(selectedIds[1])
                     this.gui.Opt("-Disabled")  ; Re-enable user interaction
                     this.PopulateNoteList()    ; Single refresh
+                    this.ReportDeleteFailure(deleted, selectedIds[1])
                 } else {
                     preview := StripNoteMarkup(noteData.content)
                     if (StrLen(preview) > 500)
@@ -6810,9 +6819,10 @@ class MainWindow {
                     if (MsgBox("Are you sure you want to delete this note?`n`nContent:`n" preview,
                         "Delete Note", "YesNo 0x30 Owner" this.gui.Hwnd) = "Yes") {
                         this.gui.Opt("+Disabled")  ; Prevent user interaction during deletion
-                        app.noteManager.DeleteNote(selectedIds[1])
+                        deleted := app.noteManager.DeleteNote(selectedIds[1])
                         this.gui.Opt("-Disabled")  ; Re-enable user interaction
                         this.PopulateNoteList()    ; Single refresh
+                        this.ReportDeleteFailure(deleted, selectedIds[1])
                     }
                 }
             }
@@ -6828,18 +6838,35 @@ class MainWindow {
                 if (needsRefresh)
                     this.noteList.Visible := false
                     
-                for noteId in selectedIds
-                    app.noteManager.DeleteNote(noteId)
-                    
+                failedIds := []
+                for noteId in selectedIds {
+                    if (!app.noteManager.DeleteNote(noteId) && !NoteStorage().IsNoteDeleted(noteId))
+                        failedIds.Push(noteId)
+                }
+
                 ; Restore listview and do single refresh
                 if (needsRefresh) {
                     this.noteList.Visible := true
                     this.PopulateNoteList()    ; Single refresh after all deletions
                 }
-                
+
                 this.gui.Opt("-Disabled")  ; Re-enable user interaction
+
+                if (failedIds.Length)
+                    MsgBox(failedIds.Length " of " selectedIds.Length " notes could not be deleted.`n`nSee the error log for details.",
+                        "Delete Notes", "0x30 Owner" this.gui.Hwnd)
             }
         }
+    }
+
+    ; Tell the user when a delete did not happen.  A note that was already
+    ; deleted (selectable when Deletion Status is "All") is not an error.
+    ReportDeleteFailure(deleted, noteId) {
+        if (deleted || NoteStorage().IsNoteDeleted(noteId))
+            return
+        LogError("Note Manager: delete failed for note " noteId)
+        MsgBox("The note could not be deleted.`n`nSee the error log for details.",
+            "Delete Note", "0x30 Owner" this.gui.Hwnd)
     }
 
     UndeleteSelectedNotes(*) {
